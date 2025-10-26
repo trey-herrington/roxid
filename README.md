@@ -6,6 +6,7 @@ A skeleton Terminal User Interface (TUI) application built with [Ratatui](https:
 
 - **Interactive Counter**: Increment and decrement a counter with keyboard controls
 - **Dynamic List**: Add items to a list dynamically
+- **YAML Pipeline Execution**: Execute automated pipelines locally with real-time progress
 - **Clean Layout**: Organized header, main content area, and footer with help text
 - **Error Handling**: Uses color-eyre for better error reporting
 - **Cross-platform**: Works on Linux, macOS, and Windows
@@ -15,6 +16,8 @@ A skeleton Terminal User Interface (TUI) application built with [Ratatui](https:
 - `ratatui` - Core TUI framework
 - `crossterm` - Cross-platform terminal manipulation
 - `color-eyre` - Error handling and reporting
+- `serde` & `serde_yaml` - YAML parsing for pipelines
+- `tokio` - Async runtime for pipeline execution
 
 ## Installation
 
@@ -37,14 +40,36 @@ cargo run
 - `a` - Add a new item to the list
 - `q` - Quit the application
 
+### Pipeline Execution
+
+Test the pipeline execution system:
+
+```bash
+# Run example pipeline
+cargo run --bin pipeline-cli example-pipeline.yaml
+
+# Run Rust build pipeline
+cargo run --bin pipeline-cli rust-build-pipeline.yaml
+```
+
+See [PIPELINE.md](PIPELINE.md) for detailed documentation on creating and executing YAML pipelines.
+
 ## Project Structure
 
 ```
 rust-tui-app/
-├── Cargo.toml          # Project dependencies and metadata
+├── Cargo.toml          # Workspace manifest
 ├── README.md           # This file
-└── src/
-    └── main.rs         # Main application code
+├── PIPELINE.md         # Pipeline execution documentation
+├── tui/                # TUI application (binary)
+├── service/            # Business logic layer (library)
+│   └── src/
+│       ├── pipeline/   # Pipeline execution system
+│       ├── models/     # Data models
+│       └── services/   # Business services
+├── rpc/                # RPC API layer (library)
+├── pipeline-cli/       # CLI tool for testing pipelines
+└── example-pipeline.yaml
 ```
 
 ## Architecture

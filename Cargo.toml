@@ -3,6 +3,7 @@ members = [
     "tui",
     "service",
     "rpc",
+    "pipeline-cli",
 ]
 resolver = "2"
 

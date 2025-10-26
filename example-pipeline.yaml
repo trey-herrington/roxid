@@ -1,0 +1,26 @@
+name: example-pipeline
+description: A simple example pipeline for testing
+
+env:
+  RUST_LOG: info
+
+steps:
+  - name: Check Rust version
+    command: rustc --version
+
+  - name: List files
+    command: ls -la
+
+  - name: Multi-line script
+    shell:
+      script: |
+        echo "Starting multi-line script"
+        echo "Current directory: $(pwd)"
+        echo "Done!"
+
+  - name: Build project
+    command: cargo build --quiet
+    continue_on_error: true
+
+  - name: Echo success
+    command: echo "Pipeline completed successfully!"
