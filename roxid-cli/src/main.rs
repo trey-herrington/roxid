@@ -10,12 +10,19 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <pipeline.yaml>", args[0]);
+    if args.len() < 3 {
+        eprintln!("Usage: {} run <pipeline.yaml>", args[0]);
         std::process::exit(1);
     }
 
-    let pipeline_path = &args[1];
+    let command = &args[1];
+    if command != "run" {
+        eprintln!("Unknown command: {}", command);
+        eprintln!("Usage: {} run <pipeline.yaml>", args[0]);
+        std::process::exit(1);
+    }
+
+    let pipeline_path = &args[2];
     println!("Loading pipeline from: {}", pipeline_path);
 
     let pipeline = PipelineParser::from_file(pipeline_path)?;

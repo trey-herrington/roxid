@@ -3,7 +3,7 @@ members = [
     "tui",
     "service",
     "rpc",
-    "pipeline-cli",
+    "roxid-cli",
 ]
 resolver = "2"
 
