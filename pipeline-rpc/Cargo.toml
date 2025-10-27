@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 pipeline-service = { path = "../pipeline-service" }
+tokio = { version = "1.0", features = ["sync"] }
 # Add your RPC dependencies here (e.g., tonic, tarpc, etc.)

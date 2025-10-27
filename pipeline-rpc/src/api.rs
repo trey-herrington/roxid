@@ -1,13 +1,15 @@
-use crate::handlers::UserHandler;
+use crate::handlers::{PipelineHandler, UserHandler};
 
 pub struct RpcServer {
     user_handler: UserHandler,
+    pipeline_handler: PipelineHandler,
 }
 
 impl RpcServer {
     pub fn new() -> Self {
         Self {
             user_handler: UserHandler::new(),
+            pipeline_handler: PipelineHandler::new(),
         }
     }
 
@@ -23,6 +25,14 @@ impl RpcServer {
 
     pub fn user_handler_mut(&mut self) -> &mut UserHandler {
         &mut self.user_handler
+    }
+
+    pub fn pipeline_handler(&self) -> &PipelineHandler {
+        &self.pipeline_handler
+    }
+
+    pub fn pipeline_handler_mut(&mut self) -> &mut PipelineHandler {
+        &mut self.pipeline_handler
     }
 }
 

@@ -135,17 +135,7 @@ roxid/
 
 ### Architecture Layers
 
-#### 1. **TUI Package** (`roxid-tui/`)
-- **Purpose**: User interface layer
-- **Type**: Binary crate (executable)
-- **Dependencies**: Depends on `pipeline-service` for business logic
-- **Structure**:
-  - `main.rs`: Application entry point
-  - `app.rs`: Application state management
-  - `events.rs`: User input handling
-  - `ui/`: All rendering logic separated by concern
-
-#### 2. **Service Package** (`pipeline-service/`)
+#### 1. **Service Package** (`pipeline-service/`)
 - **Purpose**: Core business logic
 - **Type**: Library crate
 - **Dependencies**: None (pure business logic)
@@ -155,29 +145,44 @@ roxid/
   - `services/`: Business logic implementations
   - `error.rs`: Domain-specific error types
 
-#### 3. **RPC Package** (`pipeline-rpc/`)
-- **Purpose**: Remote procedure call API
+#### 2. **RPC Package** (`pipeline-rpc/`)
+- **Purpose**: Remote procedure call API layer
 - **Type**: Library crate
 - **Dependencies**: Depends on `pipeline-service`
 - **Structure**:
   - `api.rs`: RPC server setup
-  - `handlers/`: Request handlers that call service layer
+  - `handlers/`: Request handlers that call service layer (PipelineHandler, UserHandler)
   - `error.rs`: RPC-specific error handling
+- **Responsibilities**: Provides the API interface that clients use to interact with the service layer
+
+#### 3. **TUI Package** (`roxid-tui/`)
+- **Purpose**: Terminal user interface
+- **Type**: Binary crate (executable)
+- **Dependencies**: Depends only on `pipeline-rpc`
+- **Structure**:
+  - `main.rs`: Application entry point
+  - `app.rs`: Application state management
+  - `events.rs`: User input handling
+  - `ui/`: All rendering logic separated by concern
 
 #### 4. **CLI Package** (`roxid-cli/`)
 - **Purpose**: Command-line interface
 - **Type**: Binary crate (executable)
-- **Dependencies**: Depends on `pipeline-service`
+- **Dependencies**: Depends only on `pipeline-rpc`
 - **Structure**:
   - `main.rs`: CLI entry point with command parsing
 
 ### Dependency Direction
 ```
-roxid-tui → pipeline-service
-roxid-cli → pipeline-service
-pipeline-rpc → pipeline-service
+roxid-tui → pipeline-rpc → pipeline-service
+roxid-cli → pipeline-rpc → pipeline-service
 ```
-pipeline-service has no dependencies on other packages (keeps business logic pure)
+
+**Key Architectural Principle**: Both client applications (TUI and CLI) communicate with the service layer exclusively through the RPC API. This ensures:
+- Clean separation between presentation and business logic
+- Consistent API interface for all clients
+- Easy addition of new clients (web, mobile, etc.) without modifying service code
+- Centralized API logic in the RPC layer
 
 ### TUI Application Flow
 
@@ -186,7 +191,7 @@ pipeline-service has no dependencies on other packages (keeps business logic pur
    - User navigates with arrow keys and selects with Enter
    
 2. **Pipeline Execution State**:
-   - Executes selected pipeline asynchronously
+   - Executes selected pipeline asynchronously via RPC handler
    - Displays real-time progress bar (current step / total steps)
    - Streams output to the terminal as it's generated
    - Shows completion status (success/failure)
@@ -197,8 +202,10 @@ pipeline-service has no dependencies on other packages (keeps business logic pur
    - Updates state based on execution events
    
 4. **RPC Communication**: 
-   - TUI communicates with the service layer through RPC API
-   - Uses message passing for progress updates and output streaming
+   - TUI uses `PipelineHandler` from pipeline-rpc to interact with pipelines
+   - All service operations go through the RPC layer
+   - Uses async channels for progress updates and output streaming
+   - No direct dependency on pipeline-service
 
 ### State Machine
 ```
@@ -276,29 +283,22 @@ steps:
 ### Basic Usage Example
 
 ```rust
-use pipeline_service::pipeline::{
-    ExecutionContext, PipelineExecutor, PipelineParser,
-};
+use pipeline_rpc::{PipelineHandler, ExecutionEvent};
+use color_eyre::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Create RPC handler
+    let handler = PipelineHandler::new();
+    
     // Parse pipeline from file
-    let pipeline = PipelineParser::from_file("pipeline.yaml")?;
+    let pipeline = handler.parse_from_file("pipeline.yaml")?;
     
-    // Create execution context
-    let context = ExecutionContext::new(
-        pipeline.name.clone(),
-        std::env::current_dir()?.to_string_lossy().to_string()
-    );
+    // Get working directory
+    let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
     
-    // Execute pipeline
-    let executor = PipelineExecutor::new(context);
-    let results = executor.execute(pipeline, None).await;
-    
-    // Check results
-    for result in results {
-        println!("{}: {:?}", result.step_name, result.status);
-    }
+    // Execute pipeline through RPC layer
+    handler.execute_pipeline(pipeline, working_dir, None).await?;
     
     Ok(())
 }
@@ -307,14 +307,19 @@ async fn main() -> Result<()> {
 ### With Progress Reporting
 
 ```rust
-use pipeline_service::pipeline::{ExecutionEvent, PipelineExecutor};
-use tokio::sync::mpsc;
+use pipeline_rpc::{PipelineHandler, ExecutionEvent};
 
-let (tx, mut rx) = mpsc::unbounded_channel();
+// Create event channel
+let (tx, mut rx) = PipelineHandler::create_event_channel();
+
+// Create handler and parse pipeline
+let handler = PipelineHandler::new();
+let pipeline = handler.parse_from_file("pipeline.yaml")?;
+let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
 
 // Spawn executor
 let handle = tokio::spawn(async move {
-    executor.execute(pipeline, Some(tx)).await
+    handler.execute_pipeline(pipeline, working_dir, Some(tx)).await
 });
 
 // Monitor progress
@@ -333,7 +338,7 @@ while let Some(event) = rx.recv().await {
     }
 }
 
-let results = handle.await?;
+let result = handle.await?;
 ```
 
 ### Example Pipelines
@@ -610,9 +615,13 @@ To extend the pipeline system:
 
 1. **Add new pipeline steps**: Update pipeline YAML files with new commands or shell scripts
 2. **Custom step runners**: Implement new runners in `pipeline-service/src/pipeline/runners/`
-3. **RPC handlers**: Add new RPC handlers in `pipeline-rpc/src/handlers/` for custom operations
-4. **UI screens**: Create new app states and corresponding UI components
-5. **Pipeline filters**: Add filtering/searching capabilities to the pipeline list
+3. **RPC handlers**: Add new RPC handlers in `pipeline-rpc/src/handlers/` to expose new functionality
+4. **Update RPC API**: Export new handlers and types in `pipeline-rpc/src/lib.rs`
+5. **Client updates**: Use new RPC handlers in CLI/TUI applications
+6. **UI screens**: Create new app states and corresponding UI components in TUI
+7. **Pipeline filters**: Add filtering/searching capabilities to the pipeline list
+
+**Remember**: All client functionality must go through the RPC layer. Never import `pipeline-service` directly in CLI or TUI.
 
 ### Best Practices
 
@@ -655,10 +664,13 @@ cargo check
 ### Benefits of This Structure
 
 1. **Separation of Concerns**: Each package has a single responsibility
-2. **Reusability**: Service logic can be used by TUI, CLI, and RPC
+2. **Reusability**: Service logic can be used by multiple clients through RPC layer
 3. **Testability**: Each layer can be tested independently
 4. **Maintainability**: Clear boundaries make code easier to understand
-5. **Scalability**: Easy to add new interfaces (web, CLI) without touching core logic
+5. **Scalability**: Easy to add new interfaces (web, mobile, desktop) without touching core logic
+6. **API Consistency**: All clients use the same RPC interface, ensuring consistent behavior
+7. **Security**: RPC layer can add authentication, rate limiting, and validation before reaching service
+8. **Flexibility**: RPC layer can be made into a network service without changing clients
 
 ## Resources
 

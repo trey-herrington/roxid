@@ -1,9 +1,6 @@
 use color_eyre::Result;
-use pipeline_service::pipeline::{
-    ExecutionContext, ExecutionEvent, PipelineExecutor, PipelineParser,
-};
+use pipeline_rpc::{ExecutionEvent, PipelineHandler};
 use std::env;
-use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,7 +22,9 @@ async fn main() -> Result<()> {
     let pipeline_path = &args[2];
     println!("Loading pipeline from: {}", pipeline_path);
 
-    let pipeline = PipelineParser::from_file(pipeline_path)?;
+    let handler = PipelineHandler::new();
+    let pipeline = handler.parse_from_file(pipeline_path)?;
+    
     println!("Pipeline: {}", pipeline.name);
     if let Some(desc) = &pipeline.description {
         println!("Description: {}", desc);
@@ -34,13 +33,13 @@ async fn main() -> Result<()> {
     println!();
 
     let working_dir = env::current_dir()?.to_string_lossy().to_string();
-    let context = ExecutionContext::new(pipeline.name.clone(), working_dir);
 
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = PipelineHandler::create_event_channel();
 
-    let executor = PipelineExecutor::new(context);
+    let handler_clone = PipelineHandler::new();
+    let pipeline_clone = pipeline.clone();
     let executor_handle = tokio::spawn(async move {
-        executor.execute(pipeline, Some(tx)).await
+        handler_clone.execute_pipeline(pipeline_clone, working_dir, Some(tx)).await
     });
 
     while let Some(event) = rx.recv().await {
@@ -81,7 +80,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let _results = executor_handle.await?;
+    let _result = executor_handle.await?;
 
     Ok(())
 }

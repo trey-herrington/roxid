@@ -503,6 +503,7 @@ name = "pipeline-rpc"
 version = "0.1.0"
 dependencies = [
  "pipeline-service",
+ "tokio",
 ]
 
 [[package]]
@@ -568,7 +569,7 @@ name = "roxid-cli"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "pipeline-service",
+ "pipeline-rpc",
  "tokio",
 ]
 
@@ -579,7 +580,6 @@ dependencies = [
  "color-eyre",
  "crossterm 0.29.0",
  "pipeline-rpc",
- "pipeline-service",
  "ratatui",
  "serde",
  "tokio",

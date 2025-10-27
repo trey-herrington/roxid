@@ -1,6 +1,6 @@
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
-use pipeline_service::pipeline::{ExecutionEvent, PipelineParser, PipelineExecutor, ExecutionContext};
+use pipeline_rpc::{ExecutionEvent, PipelineHandler};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -21,6 +21,7 @@ pub struct App {
     pub should_quit: bool,
     pub execution_state: Option<ExecutionState>,
     pub event_receiver: Option<UnboundedReceiver<ExecutionEvent>>,
+    pipeline_handler: PipelineHandler,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +43,8 @@ pub struct ExecutionState {
 
 impl App {
     pub fn new() -> Self {
-        let pipelines = Self::discover_pipelines();
+        let pipeline_handler = PipelineHandler::new();
+        let pipelines = Self::discover_pipelines(&pipeline_handler);
         Self {
             state: AppState::PipelineList,
             pipelines,
@@ -50,6 +52,7 @@ impl App {
             should_quit: false,
             execution_state: None,
             event_receiver: None,
+            pipeline_handler,
         }
     }
 
@@ -62,7 +65,7 @@ impl App {
         Ok(())
     }
 
-    fn discover_pipelines() -> Vec<PipelineInfo> {
+    fn discover_pipelines(handler: &PipelineHandler) -> Vec<PipelineInfo> {
         let mut pipelines = Vec::new();
         
         if let Ok(entries) = std::fs::read_dir(".") {
@@ -70,7 +73,7 @@ impl App {
                 let path = entry.path();
                 if let Some(ext) = path.extension() {
                     if ext == "yaml" || ext == "yml" {
-                        if let Ok(pipeline) = PipelineParser::from_file(&path) {
+                        if let Ok(pipeline) = handler.parse_from_file(&path) {
                             pipelines.push(PipelineInfo {
                                 name: pipeline.name.clone(),
                                 path: path.clone(),
@@ -104,7 +107,7 @@ impl App {
         }
 
         let pipeline_info = &self.pipelines[self.selected_index];
-        let pipeline = PipelineParser::from_file(&pipeline_info.path)?;
+        let pipeline = self.pipeline_handler.parse_from_file(&pipeline_info.path)?;
         
         self.state = AppState::ExecutingPipeline;
         self.execution_state = Some(ExecutionState {
@@ -117,15 +120,13 @@ impl App {
         });
 
         let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
-        let context = ExecutionContext::new(pipeline.name.clone(), working_dir);
-        let executor = PipelineExecutor::new(context);
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = PipelineHandler::create_event_channel();
         self.event_receiver = Some(rx);
         
-        let pipeline_clone = pipeline.clone();
+        let handler = PipelineHandler::new();
         tokio::spawn(async move {
-            executor.execute(pipeline_clone, Some(tx)).await;
+            let _ = handler.execute_pipeline(pipeline, working_dir, Some(tx)).await;
         });
 
         Ok(())
@@ -155,9 +156,10 @@ impl App {
                         }
                     }
                     ExecutionEvent::StepCompleted { result, .. } => {
+                        use pipeline_rpc::pipeline_service::pipeline::StepStatus;
                         let status = match result.status {
-                            pipeline_service::pipeline::StepStatus::Success => "✓",
-                            pipeline_service::pipeline::StepStatus::Failed => "✗",
+                            StepStatus::Success => "✓",
+                            StepStatus::Failed => "✗",
                             _ => "?",
                         };
                         exec_state.output_lines.push(format!("  {} Completed in {:.2}s", 

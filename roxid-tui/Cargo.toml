@@ -7,7 +7,6 @@ edition = "2021"
 color-eyre = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
-pipeline-service = { path = "../pipeline-service" }
 pipeline-rpc = { path = "../pipeline-rpc" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

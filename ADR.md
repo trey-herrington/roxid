@@ -281,9 +281,9 @@ We chose color-eyre for enhanced error reporting and panic handling.
 
 ---
 
-## ADR-004: Workspace Architecture with Service, RPC, and TUI Layers
+## ADR-004: Workspace Architecture with Service, RPC, and Client Layers
 
-**Date:** 2025-10-22
+**Date:** 2025-10-27 (Updated)
 
 **Status:** Accepted
 
@@ -296,14 +296,18 @@ We needed to organize a Rust project that would have multiple interfaces (TUI, C
 - Independent testing of each layer
 - Ability to add new interfaces without modifying core logic
 - Proper Rust workspace organization
+- **Clients should not directly access business logic - all access through API layer**
 
 ### Decision
 
-We chose a four-layer workspace architecture:
+We chose a layered workspace architecture with strict dependency rules:
+
 1. **pipeline-service** (library) - Pure business logic and pipeline execution
-2. **pipeline-rpc** (library) - Remote procedure call API wrapping service
-3. **roxid-tui** (binary) - Terminal user interface consuming service
-4. **roxid-cli** (binary) - Command-line interface consuming service
+2. **pipeline-rpc** (library) - API layer providing handlers that wrap service functionality
+3. **roxid-tui** (binary) - Terminal user interface consuming only RPC API
+4. **roxid-cli** (binary) - Command-line interface consuming only RPC API
+
+**Critical Rule**: Client applications (TUI and CLI) **only** depend on `pipeline-rpc`, never on `pipeline-service` directly.
 
 ### Consequences
 
@@ -311,25 +315,34 @@ We chose a four-layer workspace architecture:
 
 - Clear separation of concerns with well-defined boundaries
 - pipeline-service is completely independent and highly reusable
-- Easy to add new interfaces (web, gRPC, etc.) without touching core logic
+- **API layer provides consistent interface for all clients**
+- **Easy to add authentication, validation, and rate limiting in RPC layer**
+- **Can convert RPC layer to network service without changing clients**
+- Easy to add new interfaces (web, gRPC, mobile) without touching core logic
 - Each layer can be tested independently
 - Enforces good architectural practices through Rust's module system
 - Workspace structure makes dependencies explicit and prevents circular references
 - Business logic stays pure without UI or API concerns
-- Multiple frontend options (TUI and CLI) share same service layer
+- Multiple frontend options (TUI and CLI) share same API interface
+- **RPC layer can evolve independently of service implementation**
+- **Clients are shielded from service layer changes**
 
 #### Negative
 
 - More files and directories to navigate
+- Additional indirection layer (RPC) between clients and service
 - Slightly more boilerplate in initial setup
 - Need to understand Rust workspace conventions
 - May feel over-engineered for very small projects
+- **All new service features must be exposed through RPC handlers**
 
 #### Neutral
 
-- Dependency direction is strictly one-way: roxid-tui → pipeline-service, roxid-cli → pipeline-service, pipeline-rpc → pipeline-service
+- Dependency direction is strictly enforced: roxid-tui → pipeline-rpc → pipeline-service, roxid-cli → pipeline-rpc → pipeline-service
 - pipeline-service has zero dependencies on other workspace members
+- **pipeline-rpc acts as the single source of truth for the API**
 - Each layer has its own Cargo.toml and version management
+- RPC layer re-exports necessary types from service layer for client convenience
 
 ### Alternatives Considered
 
@@ -340,12 +353,12 @@ We chose a four-layer workspace architecture:
 - Cons: No enforcement of layer boundaries, risk of tight coupling, harder to reuse logic
 - Why rejected: Doesn't scale well and allows bad practices
 
-#### Option 2: pipeline-service and binaries only
+#### Option 2: Clients directly accessing pipeline-service
 
-- Description: Just pipeline-service library, roxid-tui, and roxid-cli binaries
-- Pros: Simpler than four layers
-- Cons: No clear place for RPC/API logic, would end up polluting service or binaries
-- Why rejected: pipeline-rpc layer serves as important API boundary
+- Description: TUI and CLI depend directly on pipeline-service (previous architecture)
+- Pros: One less layer, simpler dependency graph
+- Cons: No API abstraction, clients coupled to service implementation, harder to add cross-cutting concerns
+- Why rejected: Violates clean architecture principles, harder to evolve API independently
 
 #### Option 3: Monorepo with separate repositories
 
@@ -358,6 +371,7 @@ We chose a four-layer workspace architecture:
 
 - [Rust Workspaces Documentation](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html)
 - [Clean Architecture Principles](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+- [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/)
 
 ---
 
@@ -517,5 +531,103 @@ Implemented a state machine with two main states: PipelineList and ExecutingPipe
 
 - [Ratatui State Management](https://ratatui.rs/concepts/application-patterns/state-management/)
 - [Finite State Machine Pattern](https://gameprogrammingpatterns.com/state.html)
+
+---
+
+## ADR-007: Clients Must Use RPC Layer, Not Service Layer Directly
+
+**Date:** 2025-10-27
+
+**Status:** Accepted
+
+### Context
+
+Initially, both roxid-cli and roxid-tui had direct dependencies on pipeline-service, bypassing the pipeline-rpc layer. This created several issues:
+
+- Tight coupling between clients and service implementation
+- No single API boundary for external access
+- Difficult to add cross-cutting concerns (auth, logging, rate limiting)
+- RPC layer was underutilized and redundant
+- Unclear whether to use service or RPC for new features
+- Inconsistent access patterns across the codebase
+
+We needed to enforce a clear architectural boundary where all external access to business logic goes through a well-defined API layer.
+
+### Decision
+
+**All client applications (CLI, TUI, and future clients) must depend only on `pipeline-rpc` and never directly on `pipeline-service`.**
+
+Implementation changes:
+1. Created `PipelineHandler` in pipeline-rpc to wrap pipeline operations
+2. Exported necessary types (`ExecutionEvent`, `Pipeline`, `StepStatus`) from pipeline-rpc
+3. Updated roxid-cli to remove pipeline-service dependency and use PipelineHandler
+4. Updated roxid-tui to remove pipeline-service dependency and use PipelineHandler
+5. RPC layer now provides complete API surface for clients
+
+### Consequences
+
+#### Positive
+
+- **Single API boundary**: All external access goes through one well-defined layer
+- **Consistent interface**: CLI and TUI use identical API, ensuring consistency
+- **Easier evolution**: Service layer can change without breaking clients (as long as RPC API stays stable)
+- **Cross-cutting concerns**: Can add auth, logging, metrics, rate limiting in RPC layer
+- **Network transparency**: RPC layer can be converted to network service without client changes
+- **Testing**: Can mock RPC layer for client tests without involving service
+- **Security**: RPC layer acts as security boundary, validating inputs before reaching service
+- **Documentation**: Single API layer to document for external consumers
+- **API versioning**: Can version RPC API independently of service implementation
+
+#### Negative
+
+- **Extra indirection**: One more layer between clients and actual business logic
+- **API maintenance**: Every service feature must be explicitly exposed via RPC handler
+- **Type duplication**: Some types need to be re-exported or wrapped
+- **Learning curve**: Developers must understand layering rules
+
+#### Neutral
+
+- RPC layer re-exports types from service layer for convenience
+- PipelineHandler is currently a thin wrapper, may grow with features
+- Clients can only access features explicitly exposed by RPC handlers
+
+### Alternatives Considered
+
+#### Option 1: Allow direct service access for internal clients
+
+- Description: Let CLI/TUI access pipeline-service directly since they're "internal"
+- Pros: Less indirection, simpler dependency graph
+- Cons: Inconsistent access patterns, hard to migrate to network service later, no API boundary
+- Why rejected: Violates architectural principle, makes future evolution harder
+
+#### Option 2: Separate internal and external APIs
+
+- Description: Have two API layers - one for internal clients, one for external
+- Pros: Internal clients get "fast path", external clients get security boundary
+- Cons: Maintenance burden, inconsistency, unclear which API to use
+- Why rejected: Complexity doesn't justify benefits for this project
+
+#### Option 3: Make service layer the API
+
+- Description: Pipeline-service becomes the public API, eliminate RPC layer
+- Pros: One less layer
+- Cons: No place for cross-cutting concerns, harder to add network protocol later
+- Why rejected: Service layer should remain pure business logic
+
+### Migration Path
+
+For future features:
+1. Implement core logic in pipeline-service
+2. Create handler in pipeline-rpc to expose functionality
+3. Export necessary types from pipeline-rpc
+4. Use RPC handler in clients (CLI/TUI)
+
+**Never** import pipeline-service directly in client code.
+
+### References
+
+- [Clean Architecture - The Dependency Rule](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+- [Hexagonal Architecture (Ports and Adapters)](https://alistair.cockburn.us/hexagonal-architecture/)
+- [ADR-004: Workspace Architecture](#adr-004-workspace-architecture-with-service-rpc-and-client-layers)
 
 ---
