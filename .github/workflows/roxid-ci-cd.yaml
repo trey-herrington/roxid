@@ -1,9 +1,9 @@
-name: Release
+name: roxid-ci-cd
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -34,19 +34,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      
+
       - name: Install musl tools (Linux musl only)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-      
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} -p roxid
-      
+
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -54,14 +54,14 @@ jobs:
           strip roxid || true
           mv roxid ${{ matrix.asset_name }}
           tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
-      
+
       - name: Prepare binary (Windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           move roxid.exe ${{ matrix.asset_name }}
           7z a ${{ matrix.asset_name }}.zip ${{ matrix.asset_name }}
-      
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -74,15 +74,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Display structure
         run: ls -R artifacts
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
