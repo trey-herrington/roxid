@@ -1,13 +1,15 @@
 # Rust TUI Application
 
-A skeleton Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/).
+A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/) for managing and executing YAML-based pipelines.
 
 ## Features
 
-- **Interactive Counter**: Increment and decrement a counter with keyboard controls
-- **Dynamic List**: Add items to a list dynamically
-- **YAML Pipeline Execution**: Execute automated pipelines locally with real-time progress
-- **Clean Layout**: Organized header, main content area, and footer with help text
+- **Pipeline Discovery**: Automatically discovers pipeline YAML files in the current directory
+- **Interactive Selection**: Navigate through available pipelines with keyboard controls
+- **Real-time Execution**: Execute pipelines with live progress tracking
+- **Progress Visualization**: Visual progress bar showing current step
+- **Live Output**: Real-time output display during pipeline execution
+- **RPC Integration**: Communicates with the pipeline execution service via RPC API
 - **Error Handling**: Uses color-eyre for better error reporting
 - **Cross-platform**: Works on Linux, macOS, and Windows
 
@@ -27,22 +29,31 @@ cargo build --release
 
 ## Usage
 
-Run the application:
+### Interactive TUI
+
+Run the TUI application to browse and execute pipelines:
 
 ```bash
-cargo run
+cd /path/to/your/pipelines
+cargo run --bin tui
 ```
+
+The TUI will discover all `.yaml` and `.yml` files in the current directory and display them as available pipelines.
 
 ### Keyboard Controls
 
-- `j` - Increment counter
-- `k` - Decrement counter
-- `a` - Add a new item to the list
-- `q` - Quit the application
+**Pipeline List Screen:**
+- `↑` or `k` - Move selection up
+- `↓` or `j` - Move selection down
+- `Enter` - Execute selected pipeline
+- `q` or `Esc` - Quit application
+
+**Pipeline Execution Screen:**
+- `q` or `Esc` - Return to pipeline list (only after completion)
 
 ### Pipeline Execution
 
-Test the pipeline execution system:
+You can also execute pipelines directly via CLI:
 
 ```bash
 # Run example pipeline
@@ -74,23 +85,47 @@ rust-tui-app/
 
 ## Architecture
 
-The application follows a simple state management pattern:
+The application follows a modern TUI architecture with state management:
 
-1. **App State**: The `App` struct holds the application state (counter, items, quit flag)
-2. **Event Loop**: The main loop continuously:
+### TUI Application Flow
+
+1. **Pipeline List State**: 
+   - Discovers and displays available pipeline YAML files
+   - User navigates with arrow keys and selects with Enter
+   
+2. **Pipeline Execution State**:
+   - Executes selected pipeline asynchronously
+   - Displays real-time progress bar (current step / total steps)
+   - Streams output to the terminal as it's generated
+   - Shows completion status (success/failure)
+
+3. **Event Loop**: The main loop continuously:
    - Draws the UI based on current state
-   - Handles keyboard events
-   - Updates state accordingly
-3. **Rendering**: Split into separate functions for header, main content, and footer
+   - Handles keyboard events with non-blocking polling
+   - Updates state based on execution events
+   
+4. **RPC Communication**: 
+   - TUI communicates with the service layer through RPC API
+   - Uses message passing for progress updates and output streaming
+
+### Components
+
+- **App State Machine**: Manages transitions between PipelineList and ExecutingPipeline states
+- **Event Handler**: Non-blocking event processing with state-aware key bindings
+- **UI Rendering**: Modular components for pipeline list, progress bar, and output display
+- **Pipeline Executor**: Async execution with progress events streamed via channels
 
 ## Extending the Application
 
-To extend this skeleton:
+To extend this application:
 
-1. **Add new state**: Update the `App` struct with additional fields
-2. **Handle new events**: Extend `handle_key_event` with new key bindings
-3. **Create new widgets**: Add rendering functions for new UI components
-4. **Modularize**: Split code into separate files (e.g., `ui.rs`, `app.rs`, `events.rs`)
+1. **Add new pipeline steps**: Update pipeline YAML files with new commands or shell scripts
+2. **Custom step runners**: Implement new runners in `service/src/pipeline/runners/`
+3. **RPC handlers**: Add new RPC handlers in `rpc/src/handlers/` for custom operations
+4. **UI screens**: Create new app states and corresponding UI components
+5. **Pipeline filters**: Add filtering/searching capabilities to the pipeline list
+
+See [EXTENDING.md](EXTENDING.md) for detailed guides on extending the pipeline system.
 
 ## Resources
 

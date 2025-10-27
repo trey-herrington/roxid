@@ -1,32 +1,56 @@
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
+use service::pipeline::{ExecutionEvent, PipelineParser, PipelineExecutor, ExecutionContext};
+use std::path::PathBuf;
 
 use crate::events::EventHandler;
 use crate::ui;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppState {
+    PipelineList,
+    ExecutingPipeline,
+}
+
+#[derive(Debug)]
 pub struct App {
-    pub counter: i32,
-    pub items: Vec<String>,
+    pub state: AppState,
+    pub pipelines: Vec<PipelineInfo>,
+    pub selected_index: usize,
     pub should_quit: bool,
+    pub execution_state: Option<ExecutionState>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PipelineInfo {
+    pub name: String,
+    pub path: PathBuf,
+    pub description: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ExecutionState {
+    pub pipeline_name: String,
+    pub total_steps: usize,
+    pub current_step: usize,
+    pub output_lines: Vec<String>,
+    pub is_complete: bool,
+    pub success: bool,
 }
 
 impl App {
     pub fn new() -> Self {
+        let pipelines = Self::discover_pipelines();
         Self {
-            counter: 0,
-            items: vec![
-                "Welcome to your Rust TUI app!".to_string(),
-                "Press 'j' to increment counter".to_string(),
-                "Press 'k' to decrement counter".to_string(),
-                "Press 'a' to add item".to_string(),
-                "Press 'q' to quit".to_string(),
-            ],
+            state: AppState::PipelineList,
+            pipelines,
+            selected_index: 0,
             should_quit: false,
+            execution_state: None,
         }
     }
 
-    pub fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
+    pub async fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(self, frame))?;
             self.handle_events()?;
@@ -34,20 +58,126 @@ impl App {
         Ok(())
     }
 
-    pub fn increment_counter(&mut self) {
-        self.counter += 1;
+    fn discover_pipelines() -> Vec<PipelineInfo> {
+        let mut pipelines = Vec::new();
+        
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "yaml" || ext == "yml" {
+                        if let Ok(pipeline) = PipelineParser::from_file(&path) {
+                            pipelines.push(PipelineInfo {
+                                name: pipeline.name.clone(),
+                                path: path.clone(),
+                                description: pipeline.description.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        pipelines.sort_by(|a, b| a.name.cmp(&b.name));
+        pipelines
     }
 
-    pub fn decrement_counter(&mut self) {
-        self.counter -= 1;
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
     }
 
-    pub fn add_item(&mut self) {
-        let item = format!("New item {}", self.items.len() - 4);
-        self.items.push(item);
+    pub fn move_down(&mut self) {
+        if self.selected_index < self.pipelines.len().saturating_sub(1) {
+            self.selected_index += 1;
+        }
+    }
+
+    pub async fn execute_selected_pipeline(&mut self) -> Result<()> {
+        if self.pipelines.is_empty() {
+            return Ok(());
+        }
+
+        let pipeline_info = &self.pipelines[self.selected_index];
+        let pipeline = PipelineParser::from_file(&pipeline_info.path)?;
+        
+        self.state = AppState::ExecutingPipeline;
+        self.execution_state = Some(ExecutionState {
+            pipeline_name: pipeline.name.clone(),
+            total_steps: pipeline.steps.len(),
+            current_step: 0,
+            output_lines: Vec::new(),
+            is_complete: false,
+            success: false,
+        });
+
+        let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
+        let context = ExecutionContext::new(pipeline.name.clone(), working_dir);
+        let executor = PipelineExecutor::new(context);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        
+        let pipeline_clone = pipeline.clone();
+        tokio::spawn(async move {
+            executor.execute(pipeline_clone, Some(tx)).await;
+        });
+
+        while let Some(event) = rx.recv().await {
+            if let Some(exec_state) = &mut self.execution_state {
+                match event {
+                    ExecutionEvent::PipelineStarted { name } => {
+                        exec_state.output_lines.push(format!("Pipeline '{}' started", name));
+                    }
+                    ExecutionEvent::StepStarted { step_name, step_index } => {
+                        exec_state.current_step = step_index + 1;
+                        exec_state.output_lines.push(format!("\n[Step {}/{}] {}", 
+                            step_index + 1, exec_state.total_steps, step_name));
+                    }
+                    ExecutionEvent::StepOutput { output, .. } => {
+                        for line in output.lines() {
+                            exec_state.output_lines.push(format!("  {}", line));
+                        }
+                    }
+                    ExecutionEvent::StepCompleted { result, .. } => {
+                        let status = match result.status {
+                            service::pipeline::StepStatus::Success => "✓",
+                            service::pipeline::StepStatus::Failed => "✗",
+                            _ => "?",
+                        };
+                        exec_state.output_lines.push(format!("  {} Completed in {:.2}s", 
+                            status, result.duration.as_secs_f64()));
+                    }
+                    ExecutionEvent::PipelineCompleted { success, total_steps, failed_steps } => {
+                        exec_state.is_complete = true;
+                        exec_state.success = success;
+                        if success {
+                            exec_state.output_lines.push(format!("\n✓ Pipeline completed successfully! ({} steps)", total_steps));
+                        } else {
+                            exec_state.output_lines.push(format!("\n✗ Pipeline failed! ({} of {} steps failed)", 
+                                failed_steps, total_steps));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn back_to_list(&mut self) {
+        self.state = AppState::PipelineList;
+        self.execution_state = None;
     }
 
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }
