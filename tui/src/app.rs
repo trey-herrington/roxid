@@ -2,6 +2,7 @@ use color_eyre::Result;
 use ratatui::DefaultTerminal;
 use service::pipeline::{ExecutionEvent, PipelineParser, PipelineExecutor, ExecutionContext};
 use std::path::PathBuf;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::events::EventHandler;
 use crate::ui;
@@ -19,6 +20,7 @@ pub struct App {
     pub selected_index: usize,
     pub should_quit: bool,
     pub execution_state: Option<ExecutionState>,
+    pub event_receiver: Option<UnboundedReceiver<ExecutionEvent>>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +49,7 @@ impl App {
             selected_index: 0,
             should_quit: false,
             execution_state: None,
+            event_receiver: None,
         }
     }
 
@@ -54,6 +57,7 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(self, frame))?;
             self.handle_events()?;
+            self.process_execution_events();
         }
         Ok(())
     }
@@ -94,7 +98,7 @@ impl App {
         }
     }
 
-    pub async fn execute_selected_pipeline(&mut self) -> Result<()> {
+    pub fn execute_selected_pipeline(&mut self) -> Result<()> {
         if self.pipelines.is_empty() {
             return Ok(());
         }
@@ -116,14 +120,25 @@ impl App {
         let context = ExecutionContext::new(pipeline.name.clone(), working_dir);
         let executor = PipelineExecutor::new(context);
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.event_receiver = Some(rx);
         
         let pipeline_clone = pipeline.clone();
         tokio::spawn(async move {
             executor.execute(pipeline_clone, Some(tx)).await;
         });
 
-        while let Some(event) = rx.recv().await {
+        Ok(())
+    }
+
+    pub fn process_execution_events(&mut self) {
+        let Some(rx) = &mut self.event_receiver else {
+            return;
+        };
+
+        let mut should_close_receiver = false;
+
+        while let Ok(event) = rx.try_recv() {
             if let Some(exec_state) = &mut self.execution_state {
                 match event {
                     ExecutionEvent::PipelineStarted { name } => {
@@ -157,18 +172,21 @@ impl App {
                             exec_state.output_lines.push(format!("\n✗ Pipeline failed! ({} of {} steps failed)", 
                                 failed_steps, total_steps));
                         }
-                        break;
+                        should_close_receiver = true;
                     }
                 }
             }
         }
 
-        Ok(())
+        if should_close_receiver {
+            self.event_receiver = None;
+        }
     }
 
     pub fn back_to_list(&mut self) {
         self.state = AppState::PipelineList;
         self.execution_state = None;
+        self.event_receiver = None;
     }
 
     pub fn quit(&mut self) {

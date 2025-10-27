@@ -29,13 +29,7 @@ impl EventHandler for App {
                     KeyCode::Up | KeyCode::Char('k') => self.move_up(),
                     KeyCode::Down | KeyCode::Char('j') => self.move_down(),
                     KeyCode::Enter => {
-                        let mut app_clone = std::mem::take(self);
-                        tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current().block_on(async {
-                                let _ = app_clone.execute_selected_pipeline().await;
-                            });
-                        });
-                        *self = app_clone;
+                        let _ = self.execute_selected_pipeline();
                     }
                     _ => {}
                 }
