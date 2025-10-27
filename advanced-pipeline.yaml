@@ -2,7 +2,7 @@ name: advanced-pipeline
 description: Demonstrates advanced pipeline features
 
 env:
-  PROJECT_NAME: rust-tui-app
+  PROJECT_NAME: roxid
   BUILD_ENV: development
 
 steps:

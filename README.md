@@ -1,4 +1,4 @@
-# Rust TUI Application
+# Roxid
 
 A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/) for managing and executing YAML-based pipelines.
 
@@ -37,7 +37,7 @@ A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui
 
 ### 1. Build the Project
 ```bash
-cd /home/trey/repos/rust-tui-app
+cd /path/to/roxid
 cargo build
 ```
 
@@ -101,7 +101,7 @@ cargo run --bin pipeline-cli rust-build-pipeline.yaml
 This workspace follows a typical Rust project structure with separation of concerns:
 
 ```
-rust-tui-app/
+roxid/
 ├── Cargo.toml              # Workspace manifest
 ├── tui/                    # Terminal UI application (binary)
 │   ├── Cargo.toml
