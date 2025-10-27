@@ -1,6 +1,6 @@
 use crate::error::RpcResult;
-use service::models::User;
-use service::services::UserService;
+use pipeline_service::models::User;
+use pipeline_service::services::UserService;
 
 pub struct UserHandler {
     service: UserService,

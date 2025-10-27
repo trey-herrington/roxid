@@ -299,22 +299,24 @@ We needed to organize a Rust project that would have multiple interfaces (TUI, C
 
 ### Decision
 
-We chose a three-layer workspace architecture:
-1. **Service Layer** (library) - Pure business logic and pipeline execution
-2. **RPC Layer** (library) - Remote procedure call API wrapping service
-3. **TUI Layer** (binary) - Terminal user interface consuming service
+We chose a four-layer workspace architecture:
+1. **pipeline-service** (library) - Pure business logic and pipeline execution
+2. **pipeline-rpc** (library) - Remote procedure call API wrapping service
+3. **roxid-tui** (binary) - Terminal user interface consuming service
+4. **roxid-cli** (binary) - Command-line interface consuming service
 
 ### Consequences
 
 #### Positive
 
 - Clear separation of concerns with well-defined boundaries
-- Service layer is completely independent and highly reusable
+- pipeline-service is completely independent and highly reusable
 - Easy to add new interfaces (web, gRPC, etc.) without touching core logic
 - Each layer can be tested independently
 - Enforces good architectural practices through Rust's module system
 - Workspace structure makes dependencies explicit and prevents circular references
 - Business logic stays pure without UI or API concerns
+- Multiple frontend options (TUI and CLI) share same service layer
 
 #### Negative
 
@@ -325,8 +327,8 @@ We chose a three-layer workspace architecture:
 
 #### Neutral
 
-- Dependency direction is strictly one-way: TUI → Service, RPC → Service
-- Service has zero dependencies on other workspace members
+- Dependency direction is strictly one-way: roxid-tui → pipeline-service, roxid-cli → pipeline-service, pipeline-rpc → pipeline-service
+- pipeline-service has zero dependencies on other workspace members
 - Each layer has its own Cargo.toml and version management
 
 ### Alternatives Considered
@@ -338,12 +340,12 @@ We chose a three-layer workspace architecture:
 - Cons: No enforcement of layer boundaries, risk of tight coupling, harder to reuse logic
 - Why rejected: Doesn't scale well and allows bad practices
 
-#### Option 2: Service and binary only
+#### Option 2: pipeline-service and binaries only
 
-- Description: Just service library and TUI binary
-- Pros: Simpler than three layers
-- Cons: No clear place for RPC/API logic, would end up polluting service or TUI
-- Why rejected: RPC layer serves as important API boundary
+- Description: Just pipeline-service library, roxid-tui, and roxid-cli binaries
+- Pros: Simpler than four layers
+- Cons: No clear place for RPC/API logic, would end up polluting service or binaries
+- Why rejected: pipeline-rpc layer serves as important API boundary
 
 #### Option 3: Monorepo with separate repositories
 

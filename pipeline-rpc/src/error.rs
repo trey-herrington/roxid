@@ -21,8 +21,8 @@ impl fmt::Display for RpcError {
 
 impl std::error::Error for RpcError {}
 
-impl From<service::ServiceError> for RpcError {
-    fn from(err: service::ServiceError) -> Self {
+impl From<pipeline_service::ServiceError> for RpcError {
+    fn from(err: pipeline_service::ServiceError) -> Self {
         RpcError::ServiceError(err.to_string())
     }
 }

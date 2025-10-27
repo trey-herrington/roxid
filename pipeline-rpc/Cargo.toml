@@ -1,8 +1,8 @@
 [package]
-name = "rpc"
+name = "pipeline-rpc"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-service = { path = "../service" }
+pipeline-service = { path = "../pipeline-service" }
 # Add your RPC dependencies here (e.g., tonic, tarpc, etc.)

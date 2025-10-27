@@ -43,7 +43,7 @@ cargo build
 
 ### 2. Run the TUI
 ```bash
-cargo run --bin tui
+cargo run --bin roxid-tui
 ```
 
 ### 3. Navigate and Execute
@@ -66,7 +66,7 @@ Run the TUI application to browse and execute pipelines:
 
 ```bash
 cd /path/to/your/pipelines
-cargo run --bin tui
+cargo run --bin roxid-tui
 ```
 
 The TUI will discover all `.yaml` and `.yml` files in the current directory and display them as available pipelines.
@@ -88,10 +88,10 @@ You can also execute pipelines directly via CLI:
 
 ```bash
 # Run example pipeline
-cargo run --bin pipeline-cli example-pipeline.yaml
+cargo run --bin roxid-cli run example-pipeline.yaml
 
 # Run Rust build pipeline
-cargo run --bin pipeline-cli rust-build-pipeline.yaml
+cargo run --bin roxid-cli run rust-build-pipeline.yaml
 ```
 
 ## Architecture
@@ -103,7 +103,7 @@ This workspace follows a typical Rust project structure with separation of conce
 ```
 roxid/
 ├── Cargo.toml              # Workspace manifest
-├── tui/                    # Terminal UI application (binary)
+├── roxid-tui/              # Terminal UI application (binary)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs         # Entry point
@@ -113,7 +113,7 @@ roxid/
 │           ├── mod.rs
 │           ├── components.rs  # Reusable UI components
 │           └── layout.rs      # Layout definitions
-├── service/                # Business logic layer (library)
+├── pipeline-service/       # Business logic layer (library)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs          # Library entry point
@@ -121,27 +121,31 @@ roxid/
 │       ├── models/         # Data models
 │       ├── pipeline/       # Pipeline execution system
 │       └── services/       # Business logic
-└── rpc/                    # RPC API layer (library)
+├── pipeline-rpc/           # RPC API layer (library)
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs          # Library entry point
+│       ├── api.rs          # RPC server setup
+│       └── handlers/       # RPC request handlers
+└── roxid-cli/              # CLI application (binary)
     ├── Cargo.toml
     └── src/
-        ├── lib.rs          # Library entry point
-        ├── api.rs          # RPC server setup
-        └── handlers/       # RPC request handlers
+        └── main.rs         # CLI entry point
 ```
 
 ### Architecture Layers
 
-#### 1. **TUI Package** (`tui/`)
+#### 1. **TUI Package** (`roxid-tui/`)
 - **Purpose**: User interface layer
 - **Type**: Binary crate (executable)
-- **Dependencies**: Depends on `service` for business logic
+- **Dependencies**: Depends on `pipeline-service` for business logic
 - **Structure**:
   - `main.rs`: Application entry point
   - `app.rs`: Application state management
   - `events.rs`: User input handling
   - `ui/`: All rendering logic separated by concern
 
-#### 2. **Service Package** (`service/`)
+#### 2. **Service Package** (`pipeline-service/`)
 - **Purpose**: Core business logic
 - **Type**: Library crate
 - **Dependencies**: None (pure business logic)
@@ -151,21 +155,29 @@ roxid/
   - `services/`: Business logic implementations
   - `error.rs`: Domain-specific error types
 
-#### 3. **RPC Package** (`rpc/`)
+#### 3. **RPC Package** (`pipeline-rpc/`)
 - **Purpose**: Remote procedure call API
 - **Type**: Library crate
-- **Dependencies**: Depends on `service`
+- **Dependencies**: Depends on `pipeline-service`
 - **Structure**:
   - `api.rs`: RPC server setup
   - `handlers/`: Request handlers that call service layer
   - `error.rs`: RPC-specific error handling
 
+#### 4. **CLI Package** (`roxid-cli/`)
+- **Purpose**: Command-line interface
+- **Type**: Binary crate (executable)
+- **Dependencies**: Depends on `pipeline-service`
+- **Structure**:
+  - `main.rs`: CLI entry point with command parsing
+
 ### Dependency Direction
 ```
-tui → service
-rpc → service
+roxid-tui → pipeline-service
+roxid-cli → pipeline-service
+pipeline-rpc → pipeline-service
 ```
-Service has no dependencies on other packages (keeps business logic pure)
+pipeline-service has no dependencies on other packages (keeps business logic pure)
 
 ### TUI Application Flow
 
@@ -264,7 +276,7 @@ steps:
 ### Basic Usage Example
 
 ```rust
-use service::pipeline::{
+use pipeline_service::pipeline::{
     ExecutionContext, PipelineExecutor, PipelineParser,
 };
 
@@ -295,7 +307,7 @@ async fn main() -> Result<()> {
 ### With Progress Reporting
 
 ```rust
-use service::pipeline::{ExecutionEvent, PipelineExecutor};
+use pipeline_service::pipeline::{ExecutionEvent, PipelineExecutor};
 use tokio::sync::mpsc;
 
 let (tx, mut rx) = mpsc::unbounded_channel();
@@ -597,8 +609,8 @@ async fn main() -> Result<()> {
 To extend the pipeline system:
 
 1. **Add new pipeline steps**: Update pipeline YAML files with new commands or shell scripts
-2. **Custom step runners**: Implement new runners in `service/src/pipeline/runners/`
-3. **RPC handlers**: Add new RPC handlers in `rpc/src/handlers/` for custom operations
+2. **Custom step runners**: Implement new runners in `pipeline-service/src/pipeline/runners/`
+3. **RPC handlers**: Add new RPC handlers in `pipeline-rpc/src/handlers/` for custom operations
 4. **UI screens**: Create new app states and corresponding UI components
 5. **Pipeline filters**: Add filtering/searching capabilities to the pipeline list
 
@@ -619,18 +631,22 @@ To extend the pipeline system:
 cargo build
 
 # Build specific package
-cargo build -p tui
-cargo build -p service
-cargo build -p rpc
+cargo build -p roxid-tui
+cargo build -p pipeline-service
+cargo build -p pipeline-rpc
+cargo build -p roxid-cli
 
 # Run the TUI application
-cargo run --bin tui
+cargo run --bin roxid-tui
+
+# Run the CLI application
+cargo run --bin roxid-cli run example-pipeline.yaml
 
 # Run tests for all packages
 cargo test
 
 # Run tests for specific package
-cargo test -p rpc
+cargo test -p pipeline-rpc
 
 # Check code without building
 cargo check
@@ -639,7 +655,7 @@ cargo check
 ### Benefits of This Structure
 
 1. **Separation of Concerns**: Each package has a single responsibility
-2. **Reusability**: Service logic can be used by both TUI and RPC
+2. **Reusability**: Service logic can be used by TUI, CLI, and RPC
 3. **Testability**: Each layer can be tested independently
 4. **Maintainability**: Clear boundaries make code easier to understand
 5. **Scalability**: Easy to add new interfaces (web, CLI) without touching core logic

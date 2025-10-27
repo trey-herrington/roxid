@@ -1,5 +1,5 @@
 use color_eyre::Result;
-use service::pipeline::{
+use pipeline_service::pipeline::{
     ExecutionContext, ExecutionEvent, PipelineExecutor, PipelineParser,
 };
 use std::env;

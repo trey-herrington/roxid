@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "tui",
-    "service",
-    "rpc",
+    "roxid-tui",
+    "pipeline-service",
+    "pipeline-rpc",
     "roxid-cli",
 ]
 resolver = "2"

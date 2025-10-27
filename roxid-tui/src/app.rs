@@ -1,6 +1,6 @@
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
-use service::pipeline::{ExecutionEvent, PipelineParser, PipelineExecutor, ExecutionContext};
+use pipeline_service::pipeline::{ExecutionEvent, PipelineParser, PipelineExecutor, ExecutionContext};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -156,8 +156,8 @@ impl App {
                     }
                     ExecutionEvent::StepCompleted { result, .. } => {
                         let status = match result.status {
-                            service::pipeline::StepStatus::Success => "✓",
-                            service::pipeline::StepStatus::Failed => "✗",
+                            pipeline_service::pipeline::StepStatus::Success => "✓",
+                            pipeline_service::pipeline::StepStatus::Failed => "✗",
                             _ => "?",
                         };
                         exec_state.output_lines.push(format!("  {} Completed in {:.2}s", 
