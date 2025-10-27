@@ -7,12 +7,12 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let args: Vec<String> = env::args().collect();
-    
+
     // If no arguments, launch the TUI
     if args.len() == 1 {
         return roxid_tui::run().await;
     }
-    
+
     if args.len() < 3 {
         eprintln!("Usage: {} run <pipeline.yaml>", args[0]);
         eprintln!("   or: {} (to launch TUI)", args[0]);
@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
 
     let handler = PipelineHandler::new();
     let pipeline = handler.parse_from_file(pipeline_path)?;
-    
+
     println!("Pipeline: {}", pipeline.name);
     if let Some(desc) = &pipeline.description {
         println!("Description: {}", desc);
@@ -47,7 +47,9 @@ async fn main() -> Result<()> {
     let handler_clone = PipelineHandler::new();
     let pipeline_clone = pipeline.clone();
     let executor_handle = tokio::spawn(async move {
-        handler_clone.execute_pipeline(pipeline_clone, working_dir, Some(tx)).await
+        handler_clone
+            .execute_pipeline(pipeline_clone, working_dir, Some(tx))
+            .await
     });
 
     while let Some(event) = rx.recv().await {
@@ -55,7 +57,10 @@ async fn main() -> Result<()> {
             ExecutionEvent::PipelineStarted { name } => {
                 println!("==> Pipeline started: {}\n", name);
             }
-            ExecutionEvent::StepStarted { step_name, step_index } => {
+            ExecutionEvent::StepStarted {
+                step_name,
+                step_index,
+            } => {
                 println!("[Step {}/...] Running: {}", step_index + 1, step_name);
             }
             ExecutionEvent::StepOutput { output, .. } => {

@@ -18,7 +18,7 @@ impl PipelineHandler {
     }
 
     pub fn parse_from_str(&self, content: &str) -> RpcResult<Pipeline> {
-        Ok(PipelineParser::from_str(content)?)
+        Ok(PipelineParser::parse(content)?)
     }
 
     pub async fn execute_pipeline(

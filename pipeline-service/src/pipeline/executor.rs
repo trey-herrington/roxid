@@ -8,11 +8,26 @@ pub type ProgressReceiver = mpsc::UnboundedReceiver<ExecutionEvent>;
 
 #[derive(Debug, Clone)]
 pub enum ExecutionEvent {
-    PipelineStarted { name: String },
-    StepStarted { step_name: String, step_index: usize },
-    StepOutput { step_name: String, output: String },
-    StepCompleted { result: StepResult, step_index: usize },
-    PipelineCompleted { success: bool, total_steps: usize, failed_steps: usize },
+    PipelineStarted {
+        name: String,
+    },
+    StepStarted {
+        step_name: String,
+        step_index: usize,
+    },
+    StepOutput {
+        step_name: String,
+        output: String,
+    },
+    StepCompleted {
+        result: StepResult,
+        step_index: usize,
+    },
+    PipelineCompleted {
+        success: bool,
+        total_steps: usize,
+        failed_steps: usize,
+    },
 }
 
 pub struct PipelineExecutor {
@@ -31,7 +46,7 @@ impl PipelineExecutor {
     ) -> Vec<StepResult> {
         let mut results = Vec::new();
         let mut context = self.context.clone();
-        
+
         context.env.extend(pipeline.env.clone());
 
         if let Some(tx) = &progress_tx {
@@ -48,7 +63,9 @@ impl PipelineExecutor {
                 });
             }
 
-            let result = self.execute_step(step, &context, progress_tx.as_ref()).await;
+            let result = self
+                .execute_step(step, &context, progress_tx.as_ref())
+                .await;
 
             if let Some(tx) = &progress_tx {
                 let _ = tx.send(ExecutionEvent::StepCompleted {
@@ -66,7 +83,10 @@ impl PipelineExecutor {
         }
 
         if let Some(tx) = &progress_tx {
-            let failed_count = results.iter().filter(|r| r.status == StepStatus::Failed).count();
+            let failed_count = results
+                .iter()
+                .filter(|r| r.status == StepStatus::Failed)
+                .count();
             let _ = tx.send(ExecutionEvent::PipelineCompleted {
                 success: failed_count == 0,
                 total_steps: results.len(),

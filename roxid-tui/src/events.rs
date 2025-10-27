@@ -23,27 +23,23 @@ impl EventHandler for App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
         match self.state {
-            AppState::PipelineList => {
-                match key_event.code {
-                    KeyCode::Char('q') | KeyCode::Esc => self.quit(),
-                    KeyCode::Up | KeyCode::Char('k') => self.move_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.move_down(),
-                    KeyCode::Enter => {
-                        let _ = self.execute_selected_pipeline();
-                    }
-                    _ => {}
+            AppState::PipelineList => match key_event.code {
+                KeyCode::Char('q') | KeyCode::Esc => self.quit(),
+                KeyCode::Up | KeyCode::Char('k') => self.move_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.move_down(),
+                KeyCode::Enter => {
+                    let _ = self.execute_selected_pipeline();
                 }
-            }
-            AppState::ExecutingPipeline => {
-                match key_event.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        if self.execution_state.as_ref().map_or(false, |s| s.is_complete) {
-                            self.back_to_list();
-                        }
+                _ => {}
+            },
+            AppState::ExecutingPipeline => match key_event.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    if self.execution_state.as_ref().is_some_and(|s| s.is_complete) {
+                        self.back_to_list();
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
         }
         Ok(())
     }

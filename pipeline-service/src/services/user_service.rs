@@ -17,7 +17,9 @@ impl UserService {
 
     pub fn create_user(&mut self, name: String, email: String) -> ServiceResult<User> {
         if name.is_empty() {
-            return Err(ServiceError::InvalidInput("Name cannot be empty".to_string()));
+            return Err(ServiceError::InvalidInput(
+                "Name cannot be empty".to_string(),
+            ));
         }
 
         let user = User::new(self.next_id, name, email);

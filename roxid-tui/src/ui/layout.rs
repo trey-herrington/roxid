@@ -1,6 +1,4 @@
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub fn create_layout(area: Rect) -> Vec<Rect> {
     Layout::default()

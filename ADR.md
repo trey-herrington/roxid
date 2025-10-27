@@ -631,3 +631,276 @@ For future features:
 - [ADR-004: Workspace Architecture](#adr-004-workspace-architecture-with-service-rpc-and-client-layers)
 
 ---
+
+## ADR-008: Code Formatting and Quality Standards
+
+**Date:** 2025-10-27
+
+**Status:** Accepted
+
+### Context
+
+The codebase had accumulated inconsistent formatting across multiple files:
+- Mixed formatting styles in struct initializations and function calls
+- Inconsistent spacing and line breaks
+- Non-standard use of `rustfmt` conventions
+- Code readability suffered from formatting variations
+
+We needed to establish consistent code formatting standards to improve maintainability, readability, and reduce merge conflicts.
+
+### Decision
+
+Enforced consistent code formatting using `rustfmt` with default Rust formatting conventions:
+- Vertically formatted struct fields for multi-field initializations
+- Consistent spacing around operators and braces
+- Standardized line breaks for function parameters
+- Applied formatting across entire workspace (all crates)
+
+### Consequences
+
+#### Positive
+
+- **Consistent codebase**: All files follow same formatting standards
+- **Improved readability**: Code is easier to scan and understand
+- **Automated enforcement**: `cargo fmt` can verify/fix formatting
+- **Reduced bike-shedding**: No debates about formatting in code reviews
+- **Better diffs**: Logical changes aren't mixed with formatting changes
+- **Professional appearance**: Code looks polished and well-maintained
+- **CI integration ready**: Can add formatting checks to CI pipeline
+
+#### Negative
+
+- **Large initial diff**: Reformatting touched many files at once
+- **Git history noise**: Formatting commits can obscure functional changes
+- **Potential merge conflicts**: In-progress branches may conflict with formatting changes
+
+#### Neutral
+
+- One-time reformatting applied across entire project
+- Future changes automatically maintain standards with `cargo fmt`
+- Formatting is purely stylistic - no functional changes
+
+### Implementation Details
+
+Files reformatted include:
+- `pipeline-service/src/pipeline/executor.rs` - Event enum and execution logic
+- `pipeline-rpc/src/handlers/*` - Handler implementations
+- `roxid-tui/src/app.rs` - TUI application logic
+- `roxid-tui/src/ui/components.rs` - UI rendering components
+- `roxid-cli/src/main.rs` - CLI entry point
+- And other workspace files for consistency
+
+### Alternatives Considered
+
+#### Option 1: Manual formatting guidelines
+
+- Description: Document formatting rules without enforcement
+- Pros: No tooling required, flexibility
+- Cons: Inconsistently applied, requires review comments, wastes time
+- Why rejected: Unenforceable, leads to inconsistency
+
+#### Option 2: Custom rustfmt configuration
+
+- Description: Override default rustfmt rules with custom config
+- Pros: Tailored to project preferences
+- Cons: Harder to onboard new developers, non-standard conventions
+- Why rejected: Default rustfmt conventions are well-designed and familiar
+
+#### Option 3: Only format new code
+
+- Description: Leave existing code as-is, format only new additions
+- Pros: Minimal disruption
+- Cons: Perpetuates inconsistency, harder to maintain standards
+- Why rejected: Inconsistency is worse than one-time reformatting pain
+
+### References
+
+- [rustfmt Documentation](https://rust-lang.github.io/rustfmt/)
+- [Rust Style Guide](https://doc.rust-lang.org/nightly/style-guide/)
+
+---
+
+## ADR-009: API Boundary Refinement and Parser Simplification
+
+**Date:** 2025-10-27
+
+**Status:** Accepted
+
+### Context
+
+During the implementation of ADR-007 (enforcing RPC layer usage), we discovered API inconsistencies:
+
+- `PipelineParser` had both `from_str()` and `parse()` methods doing the same thing
+- Multiple ways to achieve the same result confused API consumers
+- `pipeline-rpc` exposed `from_str()` while internal code used `parse()`
+- Method naming didn't follow Rust conventions (`parse` is more idiomatic than `from_str`)
+
+### Decision
+
+Simplified and standardized the pipeline parsing API:
+1. Kept `parse()` as the primary method in `PipelineParser`
+2. Updated `pipeline-rpc::PipelineHandler` to use `parse()` instead of `from_str()`
+3. Removed redundant parsing methods
+4. Standardized naming throughout the API surface
+
+### Consequences
+
+#### Positive
+
+- **Single, clear API**: Only one way to parse pipelines
+- **Idiomatic Rust**: `parse()` follows Rust naming conventions
+- **Less confusion**: Developers know which method to use
+- **Easier documentation**: Fewer methods to explain
+- **Reduced maintenance**: Less code to maintain and test
+- **Consistency**: Internal and external APIs use same method names
+
+#### Negative
+
+- **Breaking change**: If external code called `from_str()` directly (unlikely given project age)
+- **Migration needed**: Had to update call sites in pipeline-rpc
+
+#### Neutral
+
+- Change is internal to the workspace (no external users yet)
+- Both methods had identical functionality, so no behavioral change
+
+### Implementation Details
+
+Changed in `pipeline-rpc/src/handlers/pipeline_handler.rs`:
+```rust
+// Before:
+pub fn parse_from_str(&self, content: &str) -> RpcResult<Pipeline> {
+    Ok(PipelineParser::from_str(content)?)
+}
+
+// After:
+pub fn parse_from_str(&self, content: &str) -> RpcResult<Pipeline> {
+    Ok(PipelineParser::parse(content)?)
+}
+```
+
+### Alternatives Considered
+
+#### Option 1: Keep both methods
+
+- Description: Maintain both `parse()` and `from_str()` as aliases
+- Pros: No breaking changes, maximum compatibility
+- Cons: API confusion, documentation burden, unnecessary maintenance
+- Why rejected: Simplicity and clarity more important than non-existent backward compatibility
+
+#### Option 2: Use `from_str()` everywhere
+
+- Description: Standardize on `from_str()` instead of `parse()`
+- Pros: Alternative naming convention
+- Cons: Less idiomatic Rust (`parse` is more common), more keystrokes
+- Why rejected: `parse()` is more idiomatic in Rust ecosystem
+
+### References
+
+- [Rust API Guidelines - Method Names](https://rust-lang.github.io/api-guidelines/naming.html)
+- [ADR-007: Clients Must Use RPC Layer](#adr-007-clients-must-use-rpc-layer-not-service-layer-directly)
+
+---
+
+## ADR-010: Documentation Consolidation
+
+**Date:** 2025-10-27
+
+**Status:** Accepted
+
+### Context
+
+The repository had separate files for installation and publishing instructions:
+- `INSTALL.md` (85 lines) - Installation instructions for end users
+- `PUBLISHING.md` (179 lines) - Publishing guide for maintainers
+- `README.md` - Main documentation
+
+This fragmented documentation structure had several issues:
+- Information spread across multiple files
+- Harder to find relevant documentation
+- Duplication between files
+- README didn't have complete installation instructions
+- More files to maintain and keep synchronized
+
+### Decision
+
+Consolidated all documentation into `README.md`:
+1. Deleted `INSTALL.md` and `PUBLISHING.md`
+2. Moved installation instructions to README with multiple options:
+   - Install from crates.io (recommended)
+   - Pre-built binary downloads
+   - Install from Git
+   - Build from source
+3. Added detailed platform-specific instructions
+4. Included verification and uninstallation steps
+
+### Consequences
+
+#### Positive
+
+- **Single source of truth**: All user-facing documentation in one place
+- **Easier discovery**: Users find everything in README
+- **Better UX**: Complete installation guide in main documentation
+- **Less maintenance**: One file to keep updated instead of three
+- **Standard convention**: Most projects document installation in README
+- **GitHub integration**: README shows on repository home page
+- **Multiple installation paths**: Users can choose method that fits their needs
+
+#### Negative
+
+- **Longer README**: More scrolling to find specific sections
+- **Publishing info removed**: Maintainer-specific docs may need separate location
+- **Git history**: Installation history previously in INSTALL.md is now harder to track
+
+#### Neutral
+
+- Removed example YAML files (`example-pipeline.yaml`, `advanced-pipeline.yaml`, `rust-build-pipeline.yaml`) - likely moved to examples directory or incorporated into documentation
+- Documentation is now more end-user focused, less maintainer-focused
+
+### Implementation Details
+
+**Removed files:**
+- `INSTALL.md` - 85 lines
+- `PUBLISHING.md` - 179 lines
+- `advanced-pipeline.yaml` - 58 lines (example file)
+- `example-pipeline.yaml` - 26 lines (example file)
+- `rust-build-pipeline.yaml` - 34 lines (example file)
+
+**Added to README:**
+- Four installation options (crates.io, binary, git, source)
+- Platform-specific instructions (Linux, macOS, Windows)
+- Verification steps
+- Uninstallation instructions
+- Total: ~51 lines added
+
+**Net change:** Reduced by ~468 lines across multiple files while improving accessibility.
+
+### Alternatives Considered
+
+#### Option 1: Keep separate INSTALL.md
+
+- Description: Maintain dedicated installation file
+- Pros: Focused document, shorter README
+- Cons: Users have to navigate to find it, less discoverable
+- Why rejected: README is standard location for installation instructions
+
+#### Option 2: Move to docs/ directory
+
+- Description: Create `docs/` folder with organized subdocuments
+- Pros: Organized structure, scalable for large documentation
+- Cons: Overkill for current project size, less accessible
+- Why rejected: Project documentation not yet large enough to justify
+
+#### Option 3: Keep PUBLISHING.md
+
+- Description: Remove INSTALL.md but keep maintainer docs
+- Pros: Preserves maintainer information
+- Cons: Publishing process may be automated/CI-based now, making manual docs less relevant
+- Why rejected: If needed later, can be recreated or added to CONTRIBUTING.md
+
+### References
+
+- [GitHub README Best Practices](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)
+- [Make a README](https://www.makeareadme.com/)
+
+---

@@ -46,7 +46,7 @@ mod tests {
         let user = handler
             .create_user("Alice".to_string(), "alice@example.com".to_string())
             .unwrap();
-        
+
         assert_eq!(user.name, "Alice");
         assert_eq!(user.email, "alice@example.com");
 

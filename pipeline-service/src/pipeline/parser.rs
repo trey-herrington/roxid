@@ -8,10 +8,10 @@ pub struct PipelineParser;
 impl PipelineParser {
     pub fn from_file<P: AsRef<Path>>(path: P) -> ServiceResult<Pipeline> {
         let content = fs::read_to_string(path)?;
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
-    pub fn from_str(content: &str) -> ServiceResult<Pipeline> {
+    pub fn parse(content: &str) -> ServiceResult<Pipeline> {
         let pipeline: Pipeline = serde_yaml::from_str(content)?;
         Ok(pipeline)
     }
@@ -31,7 +31,7 @@ steps:
   - name: Test
     command: cargo test
 "#;
-        let pipeline = PipelineParser::from_str(yaml).unwrap();
+        let pipeline = PipelineParser::parse(yaml).unwrap();
         assert_eq!(pipeline.name, "test-pipeline");
         assert_eq!(pipeline.steps.len(), 2);
     }
@@ -48,9 +48,12 @@ steps:
     env:
       BUILD_MODE: release
 "#;
-        let pipeline = PipelineParser::from_str(yaml).unwrap();
+        let pipeline = PipelineParser::parse(yaml).unwrap();
         assert_eq!(pipeline.env.get("RUST_LOG"), Some(&"debug".to_string()));
-        assert_eq!(pipeline.steps[0].env.get("BUILD_MODE"), Some(&"release".to_string()));
+        assert_eq!(
+            pipeline.steps[0].env.get("BUILD_MODE"),
+            Some(&"release".to_string())
+        );
     }
 
     #[test]
@@ -64,7 +67,7 @@ steps:
         echo "Hello"
         echo "World"
 "#;
-        let pipeline = PipelineParser::from_str(yaml).unwrap();
+        let pipeline = PipelineParser::parse(yaml).unwrap();
         assert_eq!(pipeline.steps.len(), 1);
     }
 }

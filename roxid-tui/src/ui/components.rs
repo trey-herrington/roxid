@@ -10,12 +10,21 @@ use crate::app::{ExecutionState, PipelineInfo};
 
 pub fn render_header(title: &str, frame: &mut Frame, area: Rect) {
     let header = Paragraph::new(title)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(header, area);
 }
 
-pub fn render_pipeline_list(pipelines: &[PipelineInfo], selected_index: usize, frame: &mut Frame, area: Rect) {
+pub fn render_pipeline_list(
+    pipelines: &[PipelineInfo],
+    selected_index: usize,
+    frame: &mut Frame,
+    area: Rect,
+) {
     if pipelines.is_empty() {
         let empty_msg = Paragraph::new("No pipeline YAML files found in current directory")
             .style(Style::default().fg(Color::Yellow))
@@ -39,10 +48,12 @@ pub fn render_pipeline_list(pipelines: &[PipelineInfo], selected_index: usize, f
             };
 
             let indicator = if i == selected_index { "→ " } else { "  " };
-            let desc = pipeline.description.as_ref()
+            let desc = pipeline
+                .description
+                .as_ref()
                 .map(|d| format!(" - {}", d))
                 .unwrap_or_default();
-            
+
             let content = Line::from(vec![
                 Span::styled(indicator, style),
                 Span::styled(&pipeline.name, style),
@@ -53,9 +64,13 @@ pub fn render_pipeline_list(pipelines: &[PipelineInfo], selected_index: usize, f
         .collect();
 
     let list = List::new(list_items)
-        .block(Block::default().borders(Borders::ALL).title("Available Pipelines"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Available Pipelines"),
+        )
         .style(Style::default());
-    
+
     frame.render_widget(list, area);
 }
 
@@ -65,8 +80,8 @@ pub fn render_execution_view(exec_state: &ExecutionState, frame: &mut Frame, are
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Progress bar
-            Constraint::Min(0),     // Output
+            Constraint::Length(3), // Progress bar
+            Constraint::Min(0),    // Output
         ])
         .split(area);
 
@@ -77,8 +92,11 @@ pub fn render_execution_view(exec_state: &ExecutionState, frame: &mut Frame, are
         0.0
     };
 
-    let label = format!("Step {}/{}", exec_state.current_step, exec_state.total_steps);
-    
+    let label = format!(
+        "Step {}/{}",
+        exec_state.current_step, exec_state.total_steps
+    );
+
     let gauge_color = if exec_state.is_complete {
         if exec_state.success {
             Color::Green
@@ -94,13 +112,14 @@ pub fn render_execution_view(exec_state: &ExecutionState, frame: &mut Frame, are
         .gauge_style(Style::default().fg(gauge_color))
         .label(label)
         .ratio(progress / 100.0);
-    
+
     frame.render_widget(gauge, chunks[0]);
 
     // Output
     let output_height = chunks[1].height.saturating_sub(2) as usize;
     let start_line = exec_state.output_lines.len().saturating_sub(output_height);
-    let visible_lines: Vec<Line> = exec_state.output_lines
+    let visible_lines: Vec<Line> = exec_state
+        .output_lines
         .iter()
         .skip(start_line)
         .map(|line| {
@@ -109,7 +128,12 @@ pub fn render_execution_view(exec_state: &ExecutionState, frame: &mut Frame, are
             } else if line.contains("✗") {
                 Line::from(Span::styled(line, Style::default().fg(Color::Red)))
             } else if line.starts_with("[Step") {
-                Line::from(Span::styled(line, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                Line::from(Span::styled(
+                    line,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
             } else {
                 Line::from(line.as_str())
             }
@@ -120,7 +144,7 @@ pub fn render_execution_view(exec_state: &ExecutionState, frame: &mut Frame, are
         .block(Block::default().borders(Borders::ALL).title("Output"))
         .style(Style::default().fg(Color::White))
         .wrap(Wrap { trim: false });
-    
+
     frame.render_widget(output, chunks[1]);
 }
 

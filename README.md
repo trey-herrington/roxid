@@ -54,8 +54,59 @@ cargo run --bin roxid-tui
 
 ## Installation
 
+### Option 1: From crates.io (Recommended)
+
 ```bash
+cargo install roxid
+roxid
+```
+
+### Option 2: Pre-built Binary
+
+Download from [Releases](https://github.com/yourusername/roxid/releases/latest):
+- **Linux x86_64**: `roxid-linux-x86_64.tar.gz`
+- **macOS Intel**: `roxid-macos-x86_64.tar.gz`
+- **macOS Apple Silicon**: `roxid-macos-aarch64.tar.gz`
+- **Windows**: `roxid-windows-x86_64.exe.zip`
+
+**Linux/macOS:**
+```bash
+tar xzf roxid-*.tar.gz
+sudo mv roxid-* /usr/local/bin/roxid
+chmod +x /usr/local/bin/roxid
+```
+
+**Windows:** Extract ZIP and add to PATH.
+
+### Option 3: From Git
+
+```bash
+cargo install --git https://github.com/yourusername/roxid
+```
+
+### Option 4: Build from Source
+
+```bash
+git clone https://github.com/yourusername/roxid
+cd roxid
 cargo build --release
+sudo cp target/release/roxid /usr/local/bin/
+```
+
+### Verify
+
+```bash
+roxid --help
+```
+
+### Uninstall
+
+```bash
+# If installed via cargo:
+cargo uninstall roxid
+
+# If installed manually:
+sudo rm /usr/local/bin/roxid
 ```
 
 ## Usage

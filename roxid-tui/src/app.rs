@@ -1,6 +1,6 @@
 use color_eyre::Result;
-use ratatui::DefaultTerminal;
 use pipeline_rpc::{ExecutionEvent, PipelineHandler};
+use ratatui::DefaultTerminal;
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -67,7 +67,7 @@ impl App {
 
     fn discover_pipelines(handler: &PipelineHandler) -> Vec<PipelineInfo> {
         let mut pipelines = Vec::new();
-        
+
         if let Ok(entries) = std::fs::read_dir(".") {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -84,7 +84,7 @@ impl App {
                 }
             }
         }
-        
+
         pipelines.sort_by(|a, b| a.name.cmp(&b.name));
         pipelines
     }
@@ -108,7 +108,7 @@ impl App {
 
         let pipeline_info = &self.pipelines[self.selected_index];
         let pipeline = self.pipeline_handler.parse_from_file(&pipeline_info.path)?;
-        
+
         self.state = AppState::ExecutingPipeline;
         self.execution_state = Some(ExecutionState {
             pipeline_name: pipeline.name.clone(),
@@ -123,10 +123,12 @@ impl App {
 
         let (tx, rx) = PipelineHandler::create_event_channel();
         self.event_receiver = Some(rx);
-        
+
         let handler = PipelineHandler::new();
         tokio::spawn(async move {
-            let _ = handler.execute_pipeline(pipeline, working_dir, Some(tx)).await;
+            let _ = handler
+                .execute_pipeline(pipeline, working_dir, Some(tx))
+                .await;
         });
 
         Ok(())
@@ -143,12 +145,21 @@ impl App {
             if let Some(exec_state) = &mut self.execution_state {
                 match event {
                     ExecutionEvent::PipelineStarted { name } => {
-                        exec_state.output_lines.push(format!("Pipeline '{}' started", name));
+                        exec_state
+                            .output_lines
+                            .push(format!("Pipeline '{}' started", name));
                     }
-                    ExecutionEvent::StepStarted { step_name, step_index } => {
+                    ExecutionEvent::StepStarted {
+                        step_name,
+                        step_index,
+                    } => {
                         exec_state.current_step = step_index + 1;
-                        exec_state.output_lines.push(format!("\n[Step {}/{}] {}", 
-                            step_index + 1, exec_state.total_steps, step_name));
+                        exec_state.output_lines.push(format!(
+                            "\n[Step {}/{}] {}",
+                            step_index + 1,
+                            exec_state.total_steps,
+                            step_name
+                        ));
                     }
                     ExecutionEvent::StepOutput { output, .. } => {
                         for line in output.lines() {
@@ -162,17 +173,29 @@ impl App {
                             StepStatus::Failed => "✗",
                             _ => "?",
                         };
-                        exec_state.output_lines.push(format!("  {} Completed in {:.2}s", 
-                            status, result.duration.as_secs_f64()));
+                        exec_state.output_lines.push(format!(
+                            "  {} Completed in {:.2}s",
+                            status,
+                            result.duration.as_secs_f64()
+                        ));
                     }
-                    ExecutionEvent::PipelineCompleted { success, total_steps, failed_steps } => {
+                    ExecutionEvent::PipelineCompleted {
+                        success,
+                        total_steps,
+                        failed_steps,
+                    } => {
                         exec_state.is_complete = true;
                         exec_state.success = success;
                         if success {
-                            exec_state.output_lines.push(format!("\n✓ Pipeline completed successfully! ({} steps)", total_steps));
+                            exec_state.output_lines.push(format!(
+                                "\n✓ Pipeline completed successfully! ({} steps)",
+                                total_steps
+                            ));
                         } else {
-                            exec_state.output_lines.push(format!("\n✗ Pipeline failed! ({} of {} steps failed)", 
-                                failed_steps, total_steps));
+                            exec_state.output_lines.push(format!(
+                                "\n✗ Pipeline failed! ({} of {} steps failed)",
+                                failed_steps, total_steps
+                            ));
                         }
                         should_close_receiver = true;
                     }

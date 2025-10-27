@@ -1,8 +1,8 @@
+pub mod executor;
 pub mod models;
 pub mod parser;
-pub mod executor;
 pub mod runners;
 
-pub use models::{Pipeline, Step, StepResult, StepStatus, ExecutionContext};
+pub use executor::{ExecutionEvent, PipelineExecutor, ProgressReceiver, ProgressSender};
+pub use models::{ExecutionContext, Pipeline, Step, StepResult, StepStatus};
 pub use parser::PipelineParser;
-pub use executor::{PipelineExecutor, ExecutionEvent, ProgressSender, ProgressReceiver};
