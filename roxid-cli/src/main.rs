@@ -7,8 +7,15 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let args: Vec<String> = env::args().collect();
+    
+    // If no arguments, launch the TUI
+    if args.len() == 1 {
+        return roxid_tui::run().await;
+    }
+    
     if args.len() < 3 {
         eprintln!("Usage: {} run <pipeline.yaml>", args[0]);
+        eprintln!("   or: {} (to launch TUI)", args[0]);
         std::process::exit(1);
     }
 
@@ -16,6 +23,7 @@ async fn main() -> Result<()> {
     if command != "run" {
         eprintln!("Unknown command: {}", command);
         eprintln!("Usage: {} run <pipeline.yaml>", args[0]);
+        eprintln!("   or: {} (to launch TUI)", args[0]);
         std::process::exit(1);
     }
 

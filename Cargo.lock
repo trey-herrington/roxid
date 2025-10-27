@@ -565,11 +565,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "roxid-cli"
+name = "roxid"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
  "pipeline-rpc",
+ "roxid-tui",
  "tokio",
 ]
 

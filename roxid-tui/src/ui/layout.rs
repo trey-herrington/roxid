@@ -13,11 +13,3 @@ pub fn create_layout(area: Rect) -> Vec<Rect> {
         .split(area)
         .to_vec()
 }
-
-pub fn create_horizontal_layout(area: Rect) -> Vec<Rect> {
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area)
-        .to_vec()
-}

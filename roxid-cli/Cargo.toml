@@ -1,9 +1,22 @@
 [package]
-name = "roxid-cli"
+name = "roxid"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A Terminal User Interface (TUI) for managing and executing YAML-based pipelines"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/roxid"
+homepage = "https://github.com/yourusername/roxid"
+keywords = ["tui", "pipeline", "cli", "terminal", "yaml"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../README.md"
+
+[[bin]]
+name = "roxid"
+path = "src/main.rs"
 
 [dependencies]
 pipeline-rpc = { path = "../pipeline-rpc" }
+roxid-tui = { path = "../roxid-tui" }
 tokio = { version = "1.0", features = ["full"] }
 color-eyre = { workspace = true }
