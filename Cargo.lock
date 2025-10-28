@@ -500,7 +500,7 @@ checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
 name = "pipeline-rpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "pipeline-service",
  "tokio",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "pipeline-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_yaml",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "roxid"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "color-eyre",
  "pipeline-rpc",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "roxid-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "color-eyre",
  "crossterm 0.29.0",
