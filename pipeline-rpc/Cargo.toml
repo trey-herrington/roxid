@@ -1,6 +1,6 @@
 [package]
 name = "pipeline-rpc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Internal: RPC layer for roxid pipeline service - not intended for direct use"

@@ -1,6 +1,6 @@
 [package]
 name = "roxid"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Trey Herrington <trey.herrington00@gmail.com>"]
 description = "A Terminal User Interface (TUI) for managing and executing YAML-based pipelines"
