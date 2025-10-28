@@ -30,7 +30,7 @@ jobs:
             asset_name: roxid-macos-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset_name: roxid-windows-x86_64.exe
+            asset_name: roxid-windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -44,33 +44,74 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p roxid
+      - name: Build roxid
+        run: cargo build --release --target ${{ matrix.target }} --bin roxid
 
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           strip roxid || true
-          mv roxid ${{ matrix.asset_name }}
-          tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
+          chmod +x roxid
+          tar czf ${{ matrix.asset_name }}.tar.gz roxid
+          sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
 
       - name: Prepare binary (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
-          move roxid.exe ${{ matrix.asset_name }}
-          7z a ${{ matrix.asset_name }}.zip ${{ matrix.asset_name }}
+          Compress-Archive -Path roxid.exe -DestinationPath ${{ matrix.asset_name }}.zip
+          (Get-FileHash ${{ matrix.asset_name }}.zip -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.asset_name }}.zip" | Out-File -Encoding ASCII ${{ matrix.asset_name }}.zip.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.asset_name }}.*
+          path: |
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz.sha256
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.zip
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.zip.sha256
+
+  publish-crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish pipeline-service
+        run: cargo publish -p pipeline-service --token ${{ secrets.CARGO_TOKEN }}
+        continue-on-error: false
+
+      - name: Wait for pipeline-service to be available
+        run: sleep 30
+
+      - name: Publish pipeline-rpc
+        run: cargo publish -p pipeline-rpc --token ${{ secrets.CARGO_TOKEN }}
+        continue-on-error: false
+
+      - name: Wait for pipeline-rpc to be available
+        run: sleep 30
+
+      - name: Publish roxid-tui
+        run: cargo publish -p roxid-tui --token ${{ secrets.CARGO_TOKEN }}
+        continue-on-error: false
+
+      - name: Wait for roxid-tui to be available
+        run: sleep 30
+
+      - name: Publish roxid
+        run: cargo publish -p roxid --token ${{ secrets.CARGO_TOKEN }}
+        continue-on-error: false
 
   release:
     name: Create Release
-    needs: build
+    needs: [build, publish-crates]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,13 +121,114 @@ jobs:
         with:
           path: artifacts
 
-      - name: Display structure
-        run: ls -R artifacts
+      - name: Flatten artifacts directory
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+          ls -lh release-assets/
+
+      - name: Generate installation instructions
+        run: |
+          cat > release-assets/INSTALL.md << 'EOF'
+          # Installation Instructions
+
+          ## Option 1: Install from crates.io (Recommended)
+          ```bash
+          cargo install roxid
+          roxid --help
+          ```
+
+          ## Option 2: Pre-built Binary
+
+          ### Linux (GNU)
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/roxid-linux-x86_64.tar.gz
+          tar xzf roxid-linux-x86_64.tar.gz
+          sudo mv roxid /usr/local/bin/
+          chmod +x /usr/local/bin/roxid
+          roxid --help
+          ```
+
+          ### Linux (musl - static binary)
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/roxid-linux-x86_64-musl.tar.gz
+          tar xzf roxid-linux-x86_64-musl.tar.gz
+          sudo mv roxid /usr/local/bin/
+          chmod +x /usr/local/bin/roxid
+          roxid --help
+          ```
+
+          ### macOS (Intel)
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/roxid-macos-x86_64.tar.gz
+          tar xzf roxid-macos-x86_64.tar.gz
+          sudo mv roxid /usr/local/bin/
+          chmod +x /usr/local/bin/roxid
+          roxid --help
+          ```
+
+          ### macOS (Apple Silicon)
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/roxid-macos-aarch64.tar.gz
+          tar xzf roxid-macos-aarch64.tar.gz
+          sudo mv roxid /usr/local/bin/
+          chmod +x /usr/local/bin/roxid
+          roxid --help
+          ```
+
+          ### Windows
+          1. Download `roxid-windows-x86_64.zip`
+          2. Extract the ZIP file
+          3. Add the extracted directory to your PATH
+          4. Run `roxid --help` from Command Prompt or PowerShell
+
+          ## Option 3: Install from Git
+          ```bash
+          cargo install --git https://github.com/${{ github.repository }}
+          ```
+
+          ## Verify Installation
+          ```bash
+          roxid --version
+          ```
+
+          ## Verify Checksums
+          Download the `.sha256` file for your platform and verify:
+          ```bash
+          sha256sum -c roxid-*.sha256
+          ```
+          EOF
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*
+          files: release-assets/*
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Quick Install (Recommended)
+            ```bash
+            cargo install roxid
+            ```
+
+            ### Pre-built Binaries
+            Download the appropriate binary for your platform from the assets below.
+
+            **Available platforms:**
+            - Linux x86_64 (GNU libc): `roxid-linux-x86_64.tar.gz`
+            - Linux x86_64 (musl - static): `roxid-linux-x86_64-musl.tar.gz`
+            - macOS Intel: `roxid-macos-x86_64.tar.gz`
+            - macOS Apple Silicon: `roxid-macos-aarch64.tar.gz`
+            - Windows x86_64: `roxid-windows-x86_64.zip`
+
+            SHA256 checksums are provided for all binaries. See `INSTALL.md` for detailed installation instructions.
+
+            ### From Git
+            ```bash
+            cargo install --git https://github.com/${{ github.repository }}
+            ```
+
+            ---

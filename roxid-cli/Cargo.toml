@@ -16,7 +16,7 @@ name = "roxid"
 path = "src/main.rs"
 
 [dependencies]
-pipeline-rpc = { path = "../pipeline-rpc" }
-roxid-tui = { path = "../roxid-tui" }
+pipeline-rpc = { version = "0.1.0", path = "../pipeline-rpc" }
+roxid-tui = { version = "0.1.0", path = "../roxid-tui" }
 tokio = { version = "1.0", features = ["full"] }
 color-eyre = { workspace = true }

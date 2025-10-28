@@ -2,6 +2,12 @@
 name = "pipeline-service"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Internal: Core pipeline execution service for roxid - not intended for direct use"
+repository = "https://github.com/yourusername/roxid"
+documentation = "https://docs.rs/pipeline-service"
+readme = false
+publish = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
