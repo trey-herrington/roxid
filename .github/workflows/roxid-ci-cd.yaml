@@ -91,13 +91,6 @@ jobs:
       - name: Wait for pipeline-service to be available
         run: sleep 30
 
-      - name: Publish pipeline-rpc
-        run: cargo publish -p pipeline-rpc --token ${{ secrets.CARGO_TOKEN }}
-        continue-on-error: false
-
-      - name: Wait for pipeline-rpc to be available
-        run: sleep 30
-
       - name: Publish roxid-tui
         run: cargo publish -p roxid-tui --token ${{ secrets.CARGO_TOKEN }}
         continue-on-error: false

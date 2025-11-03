@@ -1,6 +1,6 @@
 # Roxid
 
-A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/) for managing and executing YAML-based pipelines.
+A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/) for managing and executing YAML-based pipelines via gRPC.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui
 ### TUI Features
 - **Pipeline Discovery**: Automatically discovers pipeline YAML files in the current directory
 - **Interactive Selection**: Navigate through available pipelines with keyboard controls
-- **Real-time Execution**: Execute pipelines with live progress tracking
+- **Real-time Execution**: Execute pipelines with live progress tracking via gRPC streaming
 - **Progress Visualization**: Visual progress bar showing current step
 - **Live Output**: Real-time output display during pipeline execution
 - **Error Handling**: Uses color-eyre for better error reporting
@@ -30,27 +30,30 @@ A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui
 - **YAML-based pipeline definitions**: Simple, declarative syntax
 - **Command and shell script execution**: Run single commands or multi-line scripts
 - **Environment variable support**: Pipeline-level and step-level env vars
-- **Real-time progress reporting**: Live updates via async channels
+- **Real-time progress reporting**: Live updates via gRPC streaming
 - **Error handling**: Continue on error support for non-critical steps
+
+### gRPC Service
+- **Remote execution**: Pipeline execution via gRPC service
+- **Streaming updates**: Real-time execution events streamed to clients
+- **Language-agnostic**: Any language with gRPC support can be a client
+- **Scalable architecture**: Service can be deployed independently
 
 ## Quick Start
 
-### 1. Build the Project
+Just run `roxid` - the service auto-starts and auto-stops!
+
 ```bash
-cd /path/to/roxid
-cargo build
+# Launch TUI (auto-starts service, stops when you quit)
+roxid
+
+# Or run a specific pipeline (auto-starts service, stops when done)
+roxid run example-pipeline.yaml
 ```
 
-### 2. Run the TUI
-```bash
-cargo run --bin roxid-tui
-```
+That's it! The service automatically starts when needed and stops when you're done.
 
-### 3. Navigate and Execute
-- Use **↑** and **↓** arrow keys (or **k**/**j**) to select a pipeline
-- Press **Enter** to execute the selected pipeline
-- Watch the progress bar and live output
-- Press **q** or **Esc** to return to the list after completion
+**For more details, see the [Usage](#usage) section below.**
 
 ## Installation
 
@@ -111,18 +114,24 @@ sudo rm /usr/local/bin/roxid
 
 ## Usage
 
-### Interactive TUI
+### The Simplest Way
 
-Run the TUI application to browse and execute pipelines:
+Just type `roxid` - service starts automatically and stops when you're done!
 
 ```bash
-cd /path/to/your/pipelines
-cargo run --bin roxid-tui
+# Launch TUI
+roxid
+
+# Or run a pipeline
+roxid run my-pipeline.yaml
 ```
 
-The TUI will discover all `.yaml` and `.yml` files in the current directory and display them as available pipelines.
+**Smart service management:**
+- If service isn't running → starts it for you
+- When you quit/finish → stops it automatically
+- If service was already running → leaves it running
 
-### Keyboard Controls
+### TUI Controls
 
 **Pipeline List Screen:**
 - `↑` or `k` - Move selection up
@@ -133,130 +142,196 @@ The TUI will discover all `.yaml` and `.yml` files in the current directory and 
 **Pipeline Execution Screen:**
 - `q` or `Esc` - Return to pipeline list (only after completion)
 
-### Pipeline Execution
+### CLI Pipeline Execution
 
-You can also execute pipelines directly via CLI:
+Run pipelines directly from command line:
 
 ```bash
-# Run example pipeline
-cargo run --bin roxid-cli run example-pipeline.yaml
+roxid run example-pipeline.yaml
+```
 
-# Run Rust build pipeline
-cargo run --bin roxid-cli run rust-build-pipeline.yaml
+### Alternative: Manual Service Management
+
+For development or debugging, you can manage the service manually:
+
+```bash
+# Terminal 1: Start service
+cargo run --bin pipeline-service
+
+# Terminal 2: Run TUI or CLI
+cargo run --bin roxid
+cargo run --bin roxid run pipeline.yaml
+```
+
+### Alternative: Auto-Start Scripts
+
+If running from source, convenience scripts are available:
+
+```bash
+./start-tui.sh              # Starts service, runs TUI, stops service
+./run-pipeline.sh file.yaml # Starts service, runs pipeline, stops service
+```
+
+### Troubleshooting
+
+**"Connection refused" error:**
+- The service isn't running
+- Solution: Just run `roxid` - it auto-starts the service
+
+**"Address already in use" error:**
+- Another service instance is running
+- Solution: `pkill -f pipeline-service` then retry
+
+**"No such file or directory" when parsing pipeline:**
+- Pipeline file not found
+- Solution: Use absolute path or run from correct directory
+
+### Service Management
+
+```bash
+# Check if service is running
+lsof -ti:50051
+
+# Stop service manually (if needed)
+pkill -f pipeline-service
+
+# View service logs (when using scripts)
+tail -f /tmp/pipeline-service.log
 ```
 
 ## Architecture
 
 ### Workspace Structure
 
-This workspace follows a typical Rust project structure with separation of concerns:
+This workspace follows a gRPC-based microservice architecture:
 
 ```
 roxid/
 ├── Cargo.toml              # Workspace manifest
-├── roxid-tui/              # Terminal UI application (binary)
+├── pipeline-service/       # gRPC service (library + binary)
 │   ├── Cargo.toml
+│   ├── build.rs            # Proto compilation
+│   ├── proto/
+│   │   └── pipeline.proto  # gRPC service definition
+│   └── src/
+│       ├── lib.rs          # Library entry point
+│       ├── grpc.rs         # Proto conversions and types
+│       ├── error.rs        # Error types
+│       ├── pipeline/       # Pipeline execution engine
+│       └── bin/
+│           └── server.rs   # gRPC server binary
+├── roxid-tui/              # Terminal UI (gRPC client)
+│   ├── Cargo.toml
+│   ├── build.rs            # Proto compilation
 │   └── src/
 │       ├── main.rs         # Entry point
-│       ├── app.rs          # Application state and logic
+│       ├── app.rs          # Application state and gRPC client
 │       ├── events.rs       # Event handling (keyboard, mouse)
 │       └── ui/             # UI rendering modules
-│           ├── mod.rs
-│           ├── components.rs  # Reusable UI components
-│           └── layout.rs      # Layout definitions
-├── pipeline-service/       # Business logic layer (library)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs          # Library entry point
-│       ├── error.rs        # Error types
-│       ├── models/         # Data models
-│       ├── pipeline/       # Pipeline execution system
-│       └── services/       # Business logic
-├── pipeline-rpc/           # RPC API layer (library)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs          # Library entry point
-│       ├── api.rs          # RPC server setup
-│       └── handlers/       # RPC request handlers
-└── roxid-cli/              # CLI application (binary)
+└── roxid-cli/              # CLI application (gRPC client)
     ├── Cargo.toml
+    ├── build.rs            # Proto compilation
     └── src/
-        └── main.rs         # CLI entry point
+        └── main.rs         # CLI entry point with gRPC client
 ```
 
 ### Architecture Layers
 
-#### 1. **Service Package** (`pipeline-service/`)
-- **Purpose**: Core business logic
-- **Type**: Library crate
-- **Dependencies**: None (pure business logic)
+#### 1. **Pipeline Service** (`pipeline-service/`)
+- **Purpose**: gRPC service for pipeline execution
+- **Type**: Library crate + binary executable
+- **Components**:
+  - **Library**: Core pipeline execution engine and proto conversions
+  - **Binary**: gRPC server listening on port 50051
+  - **Proto**: Service definition with streaming execution events
+- **Features**:
+  - Parse pipelines from files or strings
+  - Stream execution events in real-time
+  - Independent, language-agnostic service
 - **Structure**:
   - `models/`: Data structures and domain models
   - `pipeline/`: Pipeline execution system
   - `services/`: Business logic implementations
   - `error.rs`: Domain-specific error types
 
-#### 2. **RPC Package** (`pipeline-rpc/`)
-- **Purpose**: Remote procedure call API layer
-- **Type**: Library crate
-- **Dependencies**: Depends on `pipeline-service`
-- **Structure**:
-  - `api.rs`: RPC server setup
-  - `handlers/`: Request handlers that call service layer (PipelineHandler, UserHandler)
-  - `error.rs`: RPC-specific error handling
-- **Responsibilities**: Provides the API interface that clients use to interact with the service layer
-
-#### 3. **TUI Package** (`roxid-tui/`)
-- **Purpose**: Terminal user interface
+#### 2. **TUI Package** (`roxid-tui/`)
+- **Purpose**: Terminal user interface (gRPC client)
 - **Type**: Binary crate (executable)
-- **Dependencies**: Depends only on `pipeline-rpc`
+- **Dependencies**: gRPC client connecting to pipeline-service
 - **Structure**:
   - `main.rs`: Application entry point
-  - `app.rs`: Application state management
+  - `app.rs`: Application state and gRPC client management
   - `events.rs`: User input handling
-  - `ui/`: All rendering logic separated by concern
+  - `ui/`: UI rendering logic
 
-#### 4. **CLI Package** (`roxid-cli/`)
-- **Purpose**: Command-line interface
+#### 3. **CLI Package** (`roxid-cli/`)
+- **Purpose**: Command-line interface (gRPC client)
 - **Type**: Binary crate (executable)
-- **Dependencies**: Depends only on `pipeline-rpc`
+- **Dependencies**: gRPC client connecting to pipeline-service
 - **Structure**:
-  - `main.rs`: CLI entry point with command parsing
+  - `main.rs`: CLI entry point with gRPC client
 
-### Dependency Direction
+### Communication Architecture
+
 ```
-roxid-tui → pipeline-rpc → pipeline-service
-roxid-cli → pipeline-rpc → pipeline-service
+┌─────────────┐         gRPC          ┌──────────────────┐
+│  roxid-tui  │ ◄──────────────────► │ pipeline-service │
+│  (client)   │    Streaming Events   │   (gRPC server)  │
+└─────────────┘                       └──────────────────┘
+                                               ▲
+┌─────────────┐         gRPC                  │
+│  roxid-cli  │ ◄────────────────────────────┘
+│  (client)   │    Streaming Events
+└─────────────┘
 ```
 
-**Key Architectural Principle**: Both client applications (TUI and CLI) communicate with the service layer exclusively through the RPC API. This ensures:
-- Clean separation between presentation and business logic
-- Consistent API interface for all clients
-- Easy addition of new clients (web, mobile, etc.) without modifying service code
-- Centralized API logic in the RPC layer
+**Key Architectural Benefits**:
+- **Service Independence**: Pipeline service runs independently, can be deployed remotely
+- **Language Agnostic**: Any language with gRPC support can build clients
+- **Streaming**: Real-time execution updates via gRPC streaming
+- **Scalability**: Service can handle multiple concurrent clients
+- **Clean Separation**: Clear boundary between service and clients
+- **Testability**: Service and clients can be tested independently
+
+### gRPC Service Definition
+
+The service provides two RPCs:
+
+1. **ParsePipeline**: Parse a pipeline from file path or string content
+2. **ExecutePipeline**: Execute a pipeline with streaming progress events
+
+Events streamed during execution:
+- `PipelineStarted`: Pipeline execution begins
+- `StepStarted`: A step starts executing
+- `StepOutput`: Real-time output from step
+- `StepCompleted`: Step finishes with result
+- `PipelineCompleted`: All steps complete
 
 ### TUI Application Flow
 
-1. **Pipeline List State**: 
-   - Discovers and displays available pipeline YAML files
+1. **Initialization**:
+   - Connects to gRPC service on startup
+   - Discovers available pipeline YAML files via gRPC
+   
+2. **Pipeline List State**: 
+   - Displays available pipeline YAML files
    - User navigates with arrow keys and selects with Enter
    
-2. **Pipeline Execution State**:
-   - Executes selected pipeline asynchronously via RPC handler
+3. **Pipeline Execution State**:
+   - Sends execute request to gRPC service
    - Displays real-time progress bar (current step / total steps)
-   - Streams output to the terminal as it's generated
+   - Receives and displays streamed execution events
    - Shows completion status (success/failure)
 
-3. **Event Loop**: The main loop continuously:
+4. **Event Loop**: The main loop continuously:
    - Draws the UI based on current state
    - Handles keyboard events with non-blocking polling
-   - Updates state based on execution events
+   - Processes incoming gRPC stream events
    
-4. **RPC Communication**: 
-   - TUI uses `PipelineHandler` from pipeline-rpc to interact with pipelines
-   - All service operations go through the RPC layer
-   - Uses async channels for progress updates and output streaming
-   - No direct dependency on pipeline-service
+5. **gRPC Communication**: 
+   - TUI maintains persistent connection to pipeline-service
+   - Uses gRPC streaming for real-time execution updates
+   - Automatically handles connection errors and retries
 
 ### State Machine
 ```
@@ -693,44 +768,46 @@ cargo build
 # Build specific package
 cargo build -p roxid-tui
 cargo build -p pipeline-service
-cargo build -p pipeline-rpc
-cargo build -p roxid-cli
+cargo build -p roxid
 
-# Run the TUI application
-cargo run --bin roxid-tui
+# Start the gRPC service
+cargo run --bin pipeline-service
 
-# Run the CLI application
-cargo run --bin roxid-cli run example-pipeline.yaml
+# Run the TUI application (service must be running)
+cargo run --bin roxid
+
+# Run the CLI application (service must be running)
+cargo run --bin roxid run example-pipeline.yaml
 
 # Run tests for all packages
 cargo test
 
 # Run tests for specific package
-cargo test -p pipeline-rpc
+cargo test -p pipeline-service
 
 # Check code without building
 cargo check
 ```
 
-### Benefits of This Structure
+### Benefits of This Architecture
 
-1. **Separation of Concerns**: Each package has a single responsibility
-2. **Reusability**: Service logic can be used by multiple clients through RPC layer
-3. **Testability**: Each layer can be tested independently
-4. **Maintainability**: Clear boundaries make code easier to understand
-5. **Scalability**: Easy to add new interfaces (web, mobile, desktop) without touching core logic
-6. **API Consistency**: All clients use the same RPC interface, ensuring consistent behavior
-7. **Security**: RPC layer can add authentication, rate limiting, and validation before reaching service
-8. **Flexibility**: RPC layer can be made into a network service without changing clients
+1. **Service Independence**: gRPC service can run anywhere, local or remote
+2. **Language Agnostic**: Clients can be written in any language with gRPC support
+3. **Scalability**: Service handles multiple concurrent clients
+4. **Real-time Updates**: Streaming gRPC provides live execution feedback
+5. **Clean Separation**: Service and clients are completely decoupled
+6. **Testability**: Each component can be tested independently
+7. **Maintainability**: Clear boundaries and standard protocols
+8. **Extensibility**: Easy to add new client types (web, mobile, etc.)
+9. **Deployability**: Service can be containerized and deployed independently
 
 ## Resources
 
 - [Ratatui Documentation](https://docs.rs/ratatui)
 - [Ratatui Website](https://ratatui.rs/)
-- [Ratatui Examples](https://github.com/ratatui/ratatui/tree/main/examples)
-- [Ratatui Book](https://ratatui.rs/concepts/)
+- [Tonic gRPC Documentation](https://docs.rs/tonic)
+- [Protocol Buffers](https://protobuf.dev/)
 - [Crossterm Documentation](https://docs.rs/crossterm)
-- [Example Projects](https://github.com/ratatui/awesome-ratatui)
 
 ## License
 

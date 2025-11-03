@@ -904,3 +904,442 @@ Consolidated all documentation into `README.md`:
 - [Make a README](https://www.makeareadme.com/)
 
 ---
+
+## ADR-011: Migration to gRPC Architecture
+
+**Date:** 2025-11-03
+
+**Status:** Accepted
+
+### Context
+
+The original architecture used a thin `pipeline-rpc` abstraction layer that didn't provide actual RPC functionality - it was essentially just an API wrapper around the `pipeline-service`. This created several issues:
+
+- The "RPC" layer didn't actually provide remote procedure call capabilities
+- Clients and service were tightly coupled, requiring same process/machine
+- No true service independence or remote execution capability
+- Limited ability to support clients in other languages
+- Confusion about the purpose of the RPC layer
+
+The application needed a true microservice architecture where:
+- Service can run independently (different process, machine, container)
+- Multiple clients can connect concurrently
+- Real-time streaming updates during pipeline execution
+- Language-agnostic client support
+- True separation between service and clients
+
+### Decision
+
+**Converted the architecture to use gRPC with Tonic:**
+
+1. **Removed `pipeline-rpc` package** - eliminated the non-functional abstraction layer
+2. **Converted `pipeline-service` to gRPC service**:
+   - Created `proto/pipeline.proto` defining the service interface
+   - Implemented gRPC server binary (`src/bin/server.rs`)
+   - Added proto conversion code (`src/grpc.rs`)
+   - Service listens on `[::1]:50051`
+3. **Updated clients to use gRPC**:
+   - Both `roxid-cli` and `roxid-tui` now connect via gRPC
+   - Clients maintain persistent connections for streaming
+   - Real-time execution events via gRPC streaming
+
+**gRPC Service Definition:**
+```protobuf
+service PipelineService {
+    rpc ParsePipeline(ParsePipelineRequest) returns (ParsePipelineResponse);
+    rpc ExecutePipeline(ExecutePipelineRequest) returns (stream ExecutionEvent);
+}
+```
+
+### Consequences
+
+#### Positive
+
+- **True Service Independence**: Service runs in separate process, can be deployed remotely
+- **Concurrent Clients**: Multiple TUI/CLI instances can use the service simultaneously
+- **Real-time Streaming**: gRPC streaming provides immediate execution feedback
+- **Language Agnostic**: Any language with gRPC support can build clients (Python, Go, Java, etc.)
+- **Scalability**: Service can be containerized, load-balanced, deployed in Kubernetes
+- **Network Transparency**: Same code works locally or with remote service
+- **Standard Protocol**: Uses industry-standard Protocol Buffers and HTTP/2
+- **Type Safety**: Proto definitions provide strong typing across language boundaries
+- **Better Architecture**: Clear separation between service and clients
+- **Development Workflow**: Service can be developed/tested independently
+
+#### Negative
+
+- **Service Must Be Running**: Clients require service to be running (previously in-process)
+- **Additional Complexity**: gRPC adds more moving parts compared to direct library calls
+- **Proto Compilation**: Build process now includes proto compilation step
+- **Connection Management**: Clients must handle connection errors and retries
+- **Startup Overhead**: Two processes instead of one for local development
+
+#### Neutral
+
+- Service default is localhost IPv6 (`[::1]:50051`)
+- Proto files define the contract between service and clients
+- Both clients and service compile the proto definitions
+- Removed one package (pipeline-rpc) but service gained gRPC dependencies
+
+### Implementation Details
+
+**Files Created:**
+- `pipeline-service/proto/pipeline.proto` - Service definition
+- `pipeline-service/build.rs` - Proto compilation
+- `pipeline-service/src/grpc.rs` - Type conversions
+- `pipeline-service/src/bin/server.rs` - gRPC server
+- `roxid-cli/build.rs` - Proto compilation
+- `roxid-tui/build.rs` - Proto compilation
+
+**Files Modified:**
+- All Cargo.toml files updated with tonic/prost dependencies
+- `roxid-cli/src/main.rs` - gRPC client implementation
+- `roxid-tui/src/app.rs` - gRPC client and streaming
+- `roxid-tui/src/events.rs` - Async execution handling
+- `roxid-tui/src/lib.rs` - Async initialization
+- Workspace `Cargo.toml` - Removed pipeline-rpc member
+
+**Files Removed:**
+- Entire `pipeline-rpc/` directory and all contents
+
+**Dependencies Added:**
+- `tonic = "0.12"` - gRPC framework
+- `prost = "0.13"` - Protocol Buffers
+- `tonic-build = "0.12"` - Build-time proto compilation
+- `tokio-stream = "0.1"` - Async streaming utilities
+
+### Migration Path
+
+**For Development:**
+1. Start the service: `cargo run --bin pipeline-service`
+2. In another terminal: `cargo run --bin roxid`
+
+**For Production:**
+- Service can be containerized and deployed independently
+- Clients connect via network (update address in client code)
+- Service can use TLS for encrypted communication (future enhancement)
+- Authentication/authorization can be added to gRPC service (future enhancement)
+
+### Future Enhancements
+
+Enabled by this architecture:
+- **TLS/mTLS**: Encrypted and authenticated connections
+- **Authentication**: Token-based or certificate-based auth
+- **Load Balancing**: Multiple service instances behind load balancer
+- **Service Discovery**: Integrate with Consul, etcd, or Kubernetes
+- **Metrics/Tracing**: gRPC middleware for observability
+- **Web Clients**: JavaScript/TypeScript clients with grpc-web
+- **Mobile Clients**: iOS/Android apps using gRPC libraries
+- **API Gateway**: Expose service via gRPC-HTTP gateway
+
+### Alternatives Considered
+
+#### Option 1: Keep pipeline-rpc as thin wrapper
+
+- Description: Leave architecture as-is with in-process abstraction
+- Pros: Simpler, no network complexity
+- Cons: No remote execution, no language-agnostic clients, misleading naming
+- Why rejected: Doesn't provide actual RPC capability, limits growth
+
+#### Option 2: REST API with HTTP/JSON
+
+- Description: Implement REST API instead of gRPC
+- Pros: More familiar, easier debugging with curl
+- Cons: No bidirectional streaming, more overhead, manual serialization
+- Why rejected: gRPC streaming perfect for real-time pipeline updates
+
+#### Option 3: Message Queue (RabbitMQ/Kafka)
+
+- Description: Use message broker for communication
+- Pros: Async by nature, good for high volume
+- Cons: More infrastructure, overkill for request-response, complex setup
+- Why rejected: Too heavyweight for direct client-service communication
+
+#### Option 4: WebSocket-based custom protocol
+
+- Description: Build custom WebSocket protocol
+- Pros: Real-time bidirectional communication
+- Cons: Reinventing the wheel, no tooling, no multi-language support
+- Why rejected: gRPC provides all benefits with better tooling
+
+### References
+
+- [gRPC Documentation](https://grpc.io/docs/)
+- [Tonic (Rust gRPC)](https://github.com/hyperium/tonic)
+- [Protocol Buffers](https://protobuf.dev/)
+- [ADR-004: Workspace Architecture](#adr-004-workspace-architecture-with-service-rpc-and-client-layers) - Superseded by this decision
+- [ADR-007: Clients Must Use RPC Layer](#adr-007-clients-must-use-rpc-layer-not-service-layer-directly) - Superseded by this decision
+
+---
+
+## ADR-012: Automatic Service Lifecycle Management
+
+**Date:** 2025-11-03
+
+**Status:** Accepted
+
+### Context
+
+After implementing the gRPC architecture (ADR-011), users needed to manually start the pipeline-service before running `roxid`. This created friction:
+
+- Required two terminal windows (one for service, one for client)
+- Easy to forget to start the service
+- Users had to manage background processes manually
+- Service would remain running after client exited
+- Not intuitive for simple use cases
+
+We wanted a "just works" experience where users could simply type `roxid` and everything would work automatically.
+
+### Decision
+
+**Implemented automatic service lifecycle management in the `roxid` binary:**
+
+1. **Auto-start**: Client automatically starts `pipeline-service` if not running
+2. **Auto-stop**: Client stops service on exit only if it started it
+3. **Smart detection**: Doesn't interfere with manually managed services
+4. **Cross-platform**: Works on Unix/Linux/macOS (pkill) and Windows (taskkill)
+
+### Implementation
+
+**Added to `roxid-cli/src/main.rs`:**
+
+```rust
+fn is_service_running() -> bool {
+    // Check if port 50051 is listening
+}
+
+fn start_service() -> Result<bool> {
+    // Spawn pipeline-service binary
+    // Wait for it to be ready
+    // Return true (we started it)
+}
+
+fn stop_service() {
+    // Kill pipeline-service process
+    // Unix: pkill -f pipeline-service
+    // Windows: taskkill /F /IM pipeline-service.exe
+}
+
+async fn ensure_service_running() -> Result<bool> {
+    // Returns whether we started the service
+}
+```
+
+**Main function tracks service ownership:**
+```rust
+let we_started_service = ensure_service_running().await?;
+
+// ... run client ...
+
+// Cleanup only if we started it
+if we_started_service {
+    stop_service();
+}
+```
+
+### Consequences
+
+#### Positive
+
+- **Zero configuration**: Just run `roxid` and it works
+- **Clean**: No leftover processes after exit
+- **Smart**: Respects manually managed services
+- **Simple**: User doesn't think about service management
+- **Fast**: Reuses running service when available
+- **Intuitive**: Works like a normal application
+
+#### Negative
+
+- **Process management complexity**: Client now manages child processes
+- **Platform-specific code**: Different commands for Unix vs Windows
+- **Hidden behavior**: Service lifecycle less visible to users
+- **Startup delay**: ~1-2 seconds to start service first time
+
+#### Neutral
+
+- Service must be in same directory as `roxid` binary
+- Uses port 50051 for service detection
+- Logs go to stdio (hidden when auto-started)
+- Service stops quickly but not gracefully
+
+### User Experience
+
+**Before:**
+```bash
+# Terminal 1
+$ cargo run --bin pipeline-service
+Pipeline gRPC server listening on [::1]:50051
+
+# Terminal 2
+$ cargo run --bin roxid run pipeline.yaml
+# ... runs ...
+```
+
+**After:**
+```bash
+$ roxid run pipeline.yaml
+Starting pipeline service...
+Service ready!
+# ... runs ...
+Stopping service...
+$
+```
+
+### Edge Cases Handled
+
+1. **Service already running manually**: Detected, reused, left running ✓
+2. **Service fails to start**: Clear error message ✓
+3. **Service on wrong port**: Not detected, starts new instance ✓
+4. **Multiple clients**: First client starts, subsequent reuse ✓
+5. **Client crashes**: Service keeps running (acceptable) ⚠️
+
+### Testing
+
+Verified scenarios:
+- ✅ CLI starts fresh service, stops on exit
+- ✅ CLI with existing service, doesn't stop it
+- ✅ TUI starts fresh service, stops on quit
+- ✅ Multiple CLI calls in sequence
+- ✅ Concurrent clients sharing service
+
+### Future Enhancements
+
+Could add:
+- Graceful shutdown signal to service
+- Service health checks
+- Service restart on crash
+- Configuration for service port
+- Daemon mode for persistent service
+- Service logs location option
+
+### References
+
+- [ADR-011: Migration to gRPC Architecture](#adr-011-migration-to-grpc-architecture)
+- Implementation PR: Added service lifecycle management to roxid binary
+
+---
+
+## ADR-013: TUI Async Execution Model Fix
+
+**Date:** 2025-11-03
+
+**Status:** Accepted
+
+### Context
+
+After implementing auto-start (ADR-012), the TUI had a critical runtime error when executing pipelines:
+
+```
+Cannot start a runtime from within a runtime. This happens because a function 
+(like `block_on`) attempted to block the current thread while the thread is 
+being used to drive asynchronous tasks.
+```
+
+**Root cause**: The TUI was already running inside tokio's async runtime. When pressing Enter to execute a pipeline, the event handler tried to call `block_on()` on an async function, which tokio explicitly forbids.
+
+### Decision
+
+**Changed TUI execution model from blocking to event-driven:**
+
+Instead of:
+```rust
+KeyCode::Enter => {
+    let rt = tokio::runtime::Handle::current();
+    rt.block_on(async { self.execute_selected_pipeline().await });
+}
+```
+
+Use a pending execution flag:
+```rust
+KeyCode::Enter => {
+    self.request_execute_pipeline(); // Set flag, non-blocking
+}
+```
+
+Then handle in main loop:
+```rust
+pub async fn run(&mut self, terminal: DefaultTerminal) -> Result<()> {
+    while !self.should_quit {
+        terminal.draw(|frame| ui::render(self, frame))?;
+        self.handle_events()?; // Synchronous event handling
+        
+        // Handle async operations in proper context
+        if self.pending_execution {
+            self.pending_execution = false;
+            self.execute_selected_pipeline().await?;
+        }
+        
+        self.process_execution_events().await;
+    }
+    Ok(())
+}
+```
+
+### Implementation
+
+**Added to `App` struct:**
+- `pending_execution: bool` field
+- `request_execute_pipeline()` method to set flag
+
+**Modified main loop:**
+- Check flag each iteration
+- Execute pipeline in async context when flagged
+- Reset flag after execution
+
+**Updated event handler:**
+- Removed `block_on()` call
+- Just sets flag synchronously
+
+### Consequences
+
+#### Positive
+
+- **Fixes runtime panic**: No more nested runtime error
+- **Proper async**: All async code runs in correct context
+- **Responsive UI**: Events processed without blocking
+- **Clean separation**: Sync event handling, async execution
+- **More idiomatic**: Follows tokio best practices
+
+#### Negative
+
+- **Slight delay**: Pipeline starts next loop iteration (negligible)
+- **More state**: Additional field to track pending execution
+- **Indirect flow**: Execution not immediate from event handler
+
+#### Neutral
+
+- One extra loop iteration before execution
+- Flag-based state machine pattern
+- Could extend for other async operations
+
+### Pattern
+
+This establishes a pattern for handling async operations in the TUI:
+
+1. **Event handler**: Set flags/enqueue operations (sync)
+2. **Main loop**: Process flagged operations (async)
+3. **Render**: Pure function, no side effects (sync)
+
+Can be extended for:
+- Pipeline cancellation requests
+- Service restart requests  
+- File reload operations
+- Any async operation triggered by user input
+
+### Testing
+
+Verified:
+- ✅ TUI starts without errors
+- ✅ Arrow keys navigate pipelines
+- ✅ Enter key executes pipeline (no panic)
+- ✅ Pipeline output streams correctly
+- ✅ Can execute multiple pipelines in session
+- ✅ Quit works properly with service cleanup
+
+### References
+
+- [Tokio Runtime Documentation](https://docs.rs/tokio/latest/tokio/runtime/)
+- [Nested Runtime Error](https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.block_on)
+- [ADR-012: Automatic Service Lifecycle Management](#adr-012-automatic-service-lifecycle-management)
+
+---

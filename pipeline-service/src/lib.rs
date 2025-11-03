@@ -1,6 +1,5 @@
 pub mod error;
-pub mod models;
 pub mod pipeline;
-pub mod services;
+pub mod grpc;
 
 pub use error::{ServiceError, ServiceResult};

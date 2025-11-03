@@ -1,6 +1,92 @@
 use color_eyre::Result;
-use pipeline_rpc::{ExecutionEvent, PipelineHandler};
 use std::env;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+pub mod proto {
+    tonic::include_proto!("pipeline");
+}
+
+use proto::{
+    pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
+    ParsePipelineRequest,
+};
+
+// Check if the gRPC service is running
+fn is_service_running() -> bool {
+    std::net::TcpStream::connect("127.0.0.1:50051")
+        .or_else(|_| std::net::TcpStream::connect("[::1]:50051"))
+        .is_ok()
+}
+
+// Stop the gRPC service
+fn stop_service() {
+    // Try to find and kill the pipeline-service process
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        let _ = Command::new("pkill")
+            .arg("-f")
+            .arg("pipeline-service")
+            .output();
+    }
+    
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/IM", "pipeline-service.exe"])
+            .output();
+    }
+}
+
+// Start the gRPC service in the background
+fn start_service() -> Result<bool> {
+    let exe_path = env::current_exe()?;
+    let exe_dir = exe_path.parent().ok_or_else(|| {
+        color_eyre::eyre::eyre!("Failed to get executable directory")
+    })?;
+    
+    let service_path = exe_dir.join("pipeline-service");
+    
+    if !service_path.exists() {
+        return Err(color_eyre::eyre::eyre!(
+            "pipeline-service binary not found at: {}. Make sure both binaries are installed.",
+            service_path.display()
+        ));
+    }
+    
+    println!("Starting pipeline service...");
+    
+    Command::new(&service_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    
+    // Wait for service to be ready
+    for i in 0..30 {
+        if is_service_running() {
+            println!("Service ready!");
+            return Ok(true); // We started it
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        if i == 29 {
+            return Err(color_eyre::eyre::eyre!("Service failed to start after 15 seconds"));
+        }
+    }
+    
+    Ok(true)
+}
+
+// Ensure service is running, start if needed, returns whether we started it
+async fn ensure_service_running() -> Result<bool> {
+    if !is_service_running() {
+        start_service()
+    } else {
+        Ok(false) // Service was already running
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,7 +96,16 @@ async fn main() -> Result<()> {
 
     // If no arguments, launch the TUI
     if args.len() == 1 {
-        return roxid_tui::run().await;
+        let we_started_service = ensure_service_running().await?;
+        let result = roxid_tui::run().await;
+        
+        // Stop service if we started it
+        if we_started_service {
+            println!("Stopping service...");
+            stop_service();
+        }
+        
+        return result;
     }
 
     if args.len() < 3 {
@@ -30,8 +125,32 @@ async fn main() -> Result<()> {
     let pipeline_path = &args[2];
     println!("Loading pipeline from: {}", pipeline_path);
 
-    let handler = PipelineHandler::new();
-    let pipeline = handler.parse_from_file(pipeline_path)?;
+    // Resolve to absolute path
+    let absolute_path = if std::path::Path::new(pipeline_path).is_absolute() {
+        pipeline_path.to_string()
+    } else {
+        env::current_dir()?
+            .join(pipeline_path)
+            .to_string_lossy()
+            .to_string()
+    };
+
+    // Ensure service is running
+    let we_started_service = ensure_service_running().await?;
+
+    // Connect to gRPC server
+    let mut client = PipelineServiceClient::connect("http://[::1]:50051").await?;
+
+    // Parse the pipeline
+    let parse_request = ParsePipelineRequest {
+        source: Some(parse_pipeline_request::Source::FilePath(absolute_path)),
+    };
+
+    let response = client.parse_pipeline(parse_request).await?;
+    let pipeline = response
+        .into_inner()
+        .pipeline
+        .ok_or_else(|| color_eyre::eyre::eyre!("No pipeline returned"))?;
 
     println!("Pipeline: {}", pipeline.name);
     if let Some(desc) = &pipeline.description {
@@ -42,58 +161,75 @@ async fn main() -> Result<()> {
 
     let working_dir = env::current_dir()?.to_string_lossy().to_string();
 
-    let (tx, mut rx) = PipelineHandler::create_event_channel();
+    // Execute the pipeline
+    let execute_request = ExecutePipelineRequest {
+        pipeline: Some(pipeline),
+        working_dir,
+    };
 
-    let handler_clone = PipelineHandler::new();
-    let pipeline_clone = pipeline.clone();
-    let executor_handle = tokio::spawn(async move {
-        handler_clone
-            .execute_pipeline(pipeline_clone, working_dir, Some(tx))
-            .await
-    });
+    let mut stream = client
+        .execute_pipeline(execute_request)
+        .await?
+        .into_inner();
 
-    while let Some(event) = rx.recv().await {
-        match event {
-            ExecutionEvent::PipelineStarted { name } => {
-                println!("==> Pipeline started: {}\n", name);
-            }
-            ExecutionEvent::StepStarted {
-                step_name,
-                step_index,
-            } => {
-                println!("[Step {}/...] Running: {}", step_index + 1, step_name);
-            }
-            ExecutionEvent::StepOutput { output, .. } => {
-                println!("  | {}", output);
-            }
-            ExecutionEvent::StepCompleted { result, step_index } => {
-                println!(
-                    "[Step {}/...] {} - {:?} ({}ms, exit code: {:?})",
-                    step_index + 1,
-                    result.step_name,
-                    result.status,
-                    result.duration.as_millis(),
-                    result.exit_code
-                );
-                if let Some(error) = &result.error {
-                    println!("  Error: {}", error);
+    // Process events from the stream
+    while let Some(event) = stream.message().await? {
+        if let Some(e) = event.event {
+            use proto::execution_event::Event;
+            match e {
+                Event::PipelineStarted(started) => {
+                    println!("==> Pipeline started: {}\n", started.name);
                 }
-                println!();
-            }
-            ExecutionEvent::PipelineCompleted {
-                success,
-                total_steps,
-                failed_steps,
-            } => {
-                println!("==> Pipeline completed!");
-                println!("Total steps: {}", total_steps);
-                println!("Failed steps: {}", failed_steps);
-                println!("Status: {}", if success { "✓ SUCCESS" } else { "✗ FAILED" });
+                Event::StepStarted(started) => {
+                    println!(
+                        "[Step {}/...] Running: {}",
+                        started.step_index + 1,
+                        started.step_name
+                    );
+                }
+                Event::StepOutput(output) => {
+                    println!("  | {}", output.output);
+                }
+                Event::StepCompleted(completed) => {
+                    if let Some(result) = completed.result {
+                        let status = proto::StepStatus::try_from(result.status)
+                            .unwrap_or(proto::StepStatus::Pending);
+                        println!(
+                            "[Step {}/...] {} - {:?} ({}ms, exit code: {:?})",
+                            completed.step_index + 1,
+                            result.step_name,
+                            status,
+                            result.duration_ms,
+                            result.exit_code
+                        );
+                        if let Some(error) = &result.error {
+                            println!("  Error: {}", error);
+                        }
+                        println!();
+                    }
+                }
+                Event::PipelineCompleted(completed) => {
+                    println!("==> Pipeline completed!");
+                    println!("Total steps: {}", completed.total_steps);
+                    println!("Failed steps: {}", completed.failed_steps);
+                    println!(
+                        "Status: {}",
+                        if completed.success {
+                            "✓ SUCCESS"
+                        } else {
+                            "✗ FAILED"
+                        }
+                    );
+                }
             }
         }
     }
 
-    let _result = executor_handle.await?;
+    // Stop service if we started it
+    if we_started_service {
+        println!("\nStopping service...");
+        stop_service();
+    }
 
     Ok(())
 }
