@@ -84,6 +84,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Publish pipeline-service
         run: cargo publish -p pipeline-service --token ${{ secrets.CARGO_TOKEN }}
         continue-on-error: false
