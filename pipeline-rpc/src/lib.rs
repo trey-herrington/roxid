@@ -1,10 +1,8 @@
-pub mod api;
 pub mod error;
 pub mod handlers;
 
-pub use api::RpcServer;
 pub use error::{RpcError, RpcResult};
-pub use handlers::{PipelineHandler, UserHandler};
+pub use handlers::PipelineHandler;
 
 // Re-export types needed by clients
 pub use pipeline_service;
