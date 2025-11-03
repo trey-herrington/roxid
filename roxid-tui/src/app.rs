@@ -6,13 +6,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::events::EventHandler;
 use crate::ui;
 
-pub mod proto {
-    tonic::include_proto!("pipeline");
-}
-
-use proto::{
+use pipeline_service::grpc::proto::{
     pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
-    ParsePipelineRequest,
+    ParsePipelineRequest, ExecutionEvent, execution_event::Event, StepStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +23,7 @@ pub struct App {
     pub selected_index: usize,
     pub should_quit: bool,
     pub execution_state: Option<ExecutionState>,
-    pub event_receiver: Option<UnboundedReceiver<proto::ExecutionEvent>>,
+    pub event_receiver: Option<UnboundedReceiver<ExecutionEvent>>,
     grpc_client: Option<PipelineServiceClient<tonic::transport::Channel>>,
     pending_execution: bool,
 }
@@ -215,7 +211,6 @@ impl App {
         while let Ok(event) = rx.try_recv() {
             if let Some(exec_state) = &mut self.execution_state {
                 if let Some(e) = event.event {
-                    use proto::execution_event::Event;
                     match e {
                         Event::PipelineStarted(started) => {
                             exec_state
@@ -238,11 +233,11 @@ impl App {
                         }
                         Event::StepCompleted(completed) => {
                             if let Some(result) = completed.result {
-                                let status_enum = proto::StepStatus::try_from(result.status)
-                                    .unwrap_or(proto::StepStatus::Pending);
+                                let status_enum = StepStatus::try_from(result.status)
+                                    .unwrap_or(StepStatus::Pending);
                                 let status = match status_enum {
-                                    proto::StepStatus::Success => "✓",
-                                    proto::StepStatus::Failed => "✗",
+                                    StepStatus::Success => "✓",
+                                    StepStatus::Failed => "✗",
                                     _ => "?",
                                 };
                                 exec_state.output_lines.push(format!(
