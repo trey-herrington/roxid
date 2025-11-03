@@ -1,6 +1,6 @@
 [package]
 name = "roxid-tui"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Internal: Terminal UI components for roxid pipeline runner - not intended for direct use"
