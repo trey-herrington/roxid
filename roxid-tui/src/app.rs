@@ -1,5 +1,4 @@
 use color_eyre::Result;
-use pipeline_rpc::{ExecutionEvent, PipelineHandler};
 use ratatui::DefaultTerminal;
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -7,21 +6,30 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::events::EventHandler;
 use crate::ui;
 
+pub mod proto {
+    tonic::include_proto!("pipeline");
+}
+
+use proto::{
+    pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
+    ParsePipelineRequest,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppState {
     PipelineList,
     ExecutingPipeline,
 }
 
-#[derive(Debug)]
 pub struct App {
     pub state: AppState,
     pub pipelines: Vec<PipelineInfo>,
     pub selected_index: usize,
     pub should_quit: bool,
     pub execution_state: Option<ExecutionState>,
-    pub event_receiver: Option<UnboundedReceiver<ExecutionEvent>>,
-    pipeline_handler: PipelineHandler,
+    pub event_receiver: Option<UnboundedReceiver<proto::ExecutionEvent>>,
+    grpc_client: Option<PipelineServiceClient<tonic::transport::Channel>>,
+    pending_execution: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -42,43 +50,73 @@ pub struct ExecutionState {
 }
 
 impl App {
-    pub fn new() -> Self {
-        let pipeline_handler = PipelineHandler::new();
-        let pipelines = Self::discover_pipelines(&pipeline_handler);
-        Self {
+    pub async fn new() -> Result<Self> {
+        let mut client = PipelineServiceClient::connect("http://[::1]:50051").await?;
+        let pipelines = Self::discover_pipelines(&mut client).await;
+        Ok(Self {
             state: AppState::PipelineList,
             pipelines,
             selected_index: 0,
             should_quit: false,
             execution_state: None,
             event_receiver: None,
-            pipeline_handler,
-        }
+            grpc_client: Some(client),
+            pending_execution: false,
+        })
     }
 
     pub async fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(self, frame))?;
             self.handle_events()?;
-            self.process_execution_events();
+            
+            // Handle pending execution request
+            if self.pending_execution {
+                self.pending_execution = false;
+                self.execute_selected_pipeline().await?;
+            }
+            
+            self.process_execution_events().await;
         }
         Ok(())
     }
 
-    fn discover_pipelines(handler: &PipelineHandler) -> Vec<PipelineInfo> {
+    async fn discover_pipelines(
+        client: &mut PipelineServiceClient<tonic::transport::Channel>,
+    ) -> Vec<PipelineInfo> {
         let mut pipelines = Vec::new();
 
-        if let Ok(entries) = std::fs::read_dir(".") {
+        // Explicitly use current working directory where user ran the command
+        let current_dir = match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(_) => return pipelines, // Can't determine current dir, return empty
+        };
+
+        if let Ok(entries) = std::fs::read_dir(&current_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(ext) = path.extension() {
                     if ext == "yaml" || ext == "yml" {
-                        if let Ok(pipeline) = handler.parse_from_file(&path) {
-                            pipelines.push(PipelineInfo {
-                                name: pipeline.name.clone(),
-                                path: path.clone(),
-                                description: pipeline.description.clone(),
-                            });
+                        // Use absolute path for gRPC request
+                        let absolute_path = std::fs::canonicalize(&path)
+                            .unwrap_or_else(|_| path.clone())
+                            .to_string_lossy()
+                            .to_string();
+                        
+                        let parse_request = ParsePipelineRequest {
+                            source: Some(parse_pipeline_request::Source::FilePath(
+                                absolute_path,
+                            )),
+                        };
+
+                        if let Ok(response) = client.parse_pipeline(parse_request).await {
+                            if let Some(pipeline) = response.into_inner().pipeline {
+                                pipelines.push(PipelineInfo {
+                                    name: pipeline.name.clone(),
+                                    path: path.clone(),
+                                    description: pipeline.description.clone(),
+                                });
+                            }
                         }
                     }
                 }
@@ -100,14 +138,38 @@ impl App {
             self.selected_index += 1;
         }
     }
+    
+    pub fn request_execute_pipeline(&mut self) {
+        self.pending_execution = true;
+    }
 
-    pub fn execute_selected_pipeline(&mut self) -> Result<()> {
+    pub async fn execute_selected_pipeline(&mut self) -> Result<()> {
         if self.pipelines.is_empty() {
             return Ok(());
         }
 
         let pipeline_info = &self.pipelines[self.selected_index];
-        let pipeline = self.pipeline_handler.parse_from_file(&pipeline_info.path)?;
+
+        let client = self
+            .grpc_client
+            .as_mut()
+            .ok_or_else(|| color_eyre::eyre::eyre!("gRPC client not initialized"))?;
+
+        // Use absolute path for gRPC request
+        let absolute_path = std::fs::canonicalize(&pipeline_info.path)
+            .unwrap_or_else(|_| pipeline_info.path.clone())
+            .to_string_lossy()
+            .to_string();
+
+        let parse_request = ParsePipelineRequest {
+            source: Some(parse_pipeline_request::Source::FilePath(absolute_path)),
+        };
+
+        let response = client.parse_pipeline(parse_request).await?;
+        let pipeline = response
+            .into_inner()
+            .pipeline
+            .ok_or_else(|| color_eyre::eyre::eyre!("No pipeline returned"))?;
 
         self.state = AppState::ExecutingPipeline;
         self.execution_state = Some(ExecutionState {
@@ -121,20 +183,29 @@ impl App {
 
         let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
 
-        let (tx, rx) = PipelineHandler::create_event_channel();
+        let execute_request = ExecutePipelineRequest {
+            pipeline: Some(pipeline),
+            working_dir,
+        };
+
+        let stream = client.execute_pipeline(execute_request).await?.into_inner();
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.event_receiver = Some(rx);
 
-        let handler = PipelineHandler::new();
         tokio::spawn(async move {
-            let _ = handler
-                .execute_pipeline(pipeline, working_dir, Some(tx))
-                .await;
+            let mut stream = stream;
+            while let Ok(Some(event)) = stream.message().await {
+                if tx.send(event).is_err() {
+                    break;
+                }
+            }
         });
 
         Ok(())
     }
 
-    pub fn process_execution_events(&mut self) {
+    pub async fn process_execution_events(&mut self) {
         let Some(rx) = &mut self.event_receiver else {
             return;
         };
@@ -143,61 +214,60 @@ impl App {
 
         while let Ok(event) = rx.try_recv() {
             if let Some(exec_state) = &mut self.execution_state {
-                match event {
-                    ExecutionEvent::PipelineStarted { name } => {
-                        exec_state
-                            .output_lines
-                            .push(format!("Pipeline '{}' started", name));
-                    }
-                    ExecutionEvent::StepStarted {
-                        step_name,
-                        step_index,
-                    } => {
-                        exec_state.current_step = step_index + 1;
-                        exec_state.output_lines.push(format!(
-                            "\n[Step {}/{}] {}",
-                            step_index + 1,
-                            exec_state.total_steps,
-                            step_name
-                        ));
-                    }
-                    ExecutionEvent::StepOutput { output, .. } => {
-                        for line in output.lines() {
-                            exec_state.output_lines.push(format!("  {}", line));
+                if let Some(e) = event.event {
+                    use proto::execution_event::Event;
+                    match e {
+                        Event::PipelineStarted(started) => {
+                            exec_state
+                                .output_lines
+                                .push(format!("Pipeline '{}' started", started.name));
                         }
-                    }
-                    ExecutionEvent::StepCompleted { result, .. } => {
-                        use pipeline_rpc::pipeline_service::pipeline::StepStatus;
-                        let status = match result.status {
-                            StepStatus::Success => "✓",
-                            StepStatus::Failed => "✗",
-                            _ => "?",
-                        };
-                        exec_state.output_lines.push(format!(
-                            "  {} Completed in {:.2}s",
-                            status,
-                            result.duration.as_secs_f64()
-                        ));
-                    }
-                    ExecutionEvent::PipelineCompleted {
-                        success,
-                        total_steps,
-                        failed_steps,
-                    } => {
-                        exec_state.is_complete = true;
-                        exec_state.success = success;
-                        if success {
+                        Event::StepStarted(started) => {
+                            exec_state.current_step = started.step_index as usize + 1;
                             exec_state.output_lines.push(format!(
-                                "\n✓ Pipeline completed successfully! ({} steps)",
-                                total_steps
-                            ));
-                        } else {
-                            exec_state.output_lines.push(format!(
-                                "\n✗ Pipeline failed! ({} of {} steps failed)",
-                                failed_steps, total_steps
+                                "\n[Step {}/{}] {}",
+                                started.step_index + 1,
+                                exec_state.total_steps,
+                                started.step_name
                             ));
                         }
-                        should_close_receiver = true;
+                        Event::StepOutput(output) => {
+                            for line in output.output.lines() {
+                                exec_state.output_lines.push(format!("  {}", line));
+                            }
+                        }
+                        Event::StepCompleted(completed) => {
+                            if let Some(result) = completed.result {
+                                let status_enum = proto::StepStatus::try_from(result.status)
+                                    .unwrap_or(proto::StepStatus::Pending);
+                                let status = match status_enum {
+                                    proto::StepStatus::Success => "✓",
+                                    proto::StepStatus::Failed => "✗",
+                                    _ => "?",
+                                };
+                                exec_state.output_lines.push(format!(
+                                    "  {} Completed in {:.2}s",
+                                    status,
+                                    result.duration_ms as f64 / 1000.0
+                                ));
+                            }
+                        }
+                        Event::PipelineCompleted(completed) => {
+                            exec_state.is_complete = true;
+                            exec_state.success = completed.success;
+                            if completed.success {
+                                exec_state.output_lines.push(format!(
+                                    "\n✓ Pipeline completed successfully! ({} steps)",
+                                    completed.total_steps
+                                ));
+                            } else {
+                                exec_state.output_lines.push(format!(
+                                    "\n✗ Pipeline failed! ({} of {} steps failed)",
+                                    completed.failed_steps, completed.total_steps
+                                ));
+                            }
+                            should_close_receiver = true;
+                        }
                     }
                 }
             }
@@ -216,11 +286,5 @@ impl App {
 
     pub fn quit(&mut self) {
         self.should_quit = true;
-    }
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
     }
 }

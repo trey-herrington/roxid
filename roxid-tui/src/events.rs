@@ -28,7 +28,7 @@ impl EventHandler for App {
                 KeyCode::Up | KeyCode::Char('k') => self.move_up(),
                 KeyCode::Down | KeyCode::Char('j') => self.move_down(),
                 KeyCode::Enter => {
-                    let _ = self.execute_selected_pipeline();
+                    self.request_execute_pipeline();
                 }
                 _ => {}
             },

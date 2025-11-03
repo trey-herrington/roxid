@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package pipeline;
+
+service PipelineService {
+    rpc ParsePipeline(ParsePipelineRequest) returns (ParsePipelineResponse);
+    rpc ExecutePipeline(ExecutePipelineRequest) returns (stream ExecutionEvent);
+}
+
+message ParsePipelineRequest {
+    oneof source {
+        string file_path = 1;
+        string content = 2;
+    }
+}
+
+message ParsePipelineResponse {
+    Pipeline pipeline = 1;
+}
+
+message ExecutePipelineRequest {
+    Pipeline pipeline = 1;
+    string working_dir = 2;
+}
+
+message Pipeline {
+    string name = 1;
+    optional string description = 2;
+    map<string, string> env = 3;
+    repeated Step steps = 4;
+}
+
+message Step {
+    string name = 1;
+    StepAction action = 2;
+    map<string, string> env = 3;
+    bool continue_on_error = 4;
+}
+
+message StepAction {
+    oneof action {
+        string command = 1;
+        ShellScript shell = 2;
+    }
+}
+
+message ShellScript {
+    optional string shell = 1;
+    string script = 2;
+}
+
+message ExecutionEvent {
+    oneof event {
+        PipelineStarted pipeline_started = 1;
+        StepStarted step_started = 2;
+        StepOutput step_output = 3;
+        StepCompleted step_completed = 4;
+        PipelineCompleted pipeline_completed = 5;
+    }
+}
+
+message PipelineStarted {
+    string name = 1;
+}
+
+message StepStarted {
+    string step_name = 1;
+    uint32 step_index = 2;
+}
+
+message StepOutput {
+    string step_name = 1;
+    string output = 2;
+}
+
+message StepCompleted {
+    StepResult result = 1;
+    uint32 step_index = 2;
+}
+
+message StepResult {
+    string step_name = 1;
+    StepStatus status = 2;
+    string output = 3;
+    optional string error = 4;
+    uint64 duration_ms = 5;
+    optional int32 exit_code = 6;
+}
+
+enum StepStatus {
+    STEP_STATUS_PENDING = 0;
+    STEP_STATUS_RUNNING = 1;
+    STEP_STATUS_SUCCESS = 2;
+    STEP_STATUS_FAILED = 3;
+    STEP_STATUS_SKIPPED = 4;
+}
+
+message PipelineCompleted {
+    bool success = 1;
+    uint32 total_steps = 2;
+    uint32 failed_steps = 3;
+}
