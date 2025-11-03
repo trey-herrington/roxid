@@ -8,6 +8,7 @@ repository = "https://github.com/trey-herrington/roxid"
 documentation = "https://docs.rs/pipeline-service"
 readme = false
 publish = true
+include = ["src/**/*", "build.rs", "proto/**/*"]
 
 [[bin]]
 name = "pipeline-service"
