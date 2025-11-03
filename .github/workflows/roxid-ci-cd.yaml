@@ -52,6 +52,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
 
+      - name: Install protobuf compiler (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc
+
       - name: Build roxid
         run: cargo build --release --target ${{ matrix.target }} --bin roxid
 
