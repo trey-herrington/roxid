@@ -1,6 +1,6 @@
 [package]
 name = "roxid-tui"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Internal: Terminal UI components for roxid pipeline runner - not intended for direct use"
@@ -13,7 +13,7 @@ publish = true
 color-eyre = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
-pipeline-service = { version = "0.5.0", path = "../pipeline-service" }
+pipeline-service = { version = "0.6.0", path = "../pipeline-service" }
 tokio = { version = "1.0", features = ["full"] }
 tokio-stream = "0.1"
 serde = { version = "1.0", features = ["derive"] }
