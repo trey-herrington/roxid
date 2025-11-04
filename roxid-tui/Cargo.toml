@@ -13,7 +13,7 @@ publish = true
 color-eyre = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
-pipeline-service = { version = "0.4.0", path = "../pipeline-service" }
+pipeline-service = { version = "0.5.0", path = "../pipeline-service" }
 tokio = { version = "1.0", features = ["full"] }
 tokio-stream = "0.1"
 serde = { version = "1.0", features = ["derive"] }
