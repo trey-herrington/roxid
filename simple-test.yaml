@@ -1,0 +1,5 @@
+name: simple-test
+description: Test pipeline for discovery
+steps:
+  - name: Echo test
+    command: echo "Discovery works!"

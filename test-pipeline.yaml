@@ -1,0 +1,8 @@
+name: test-pipeline
+description: A simple test pipeline
+steps:
+  - name: Hello World
+    command: echo "Hello from test pipeline!"
+  
+  - name: Show Date
+    command: date
