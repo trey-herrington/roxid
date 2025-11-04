@@ -91,6 +91,12 @@ impl App {
         if let Ok(entries) = std::fs::read_dir(&current_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                
+                // Skip directories, only process files
+                if !path.is_file() {
+                    continue;
+                }
+                
                 if let Some(ext) = path.extension() {
                     if ext == "yaml" || ext == "yml" {
                         // Use absolute path for gRPC request
