@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{ExecutionState, PipelineInfo};
+use crate::app::{DiscoveryError, ExecutionState, PipelineInfo};
 
 pub fn render_header(title: &str, frame: &mut Frame, area: Rect) {
     let header = Paragraph::new(title)
@@ -26,7 +26,14 @@ pub fn render_pipeline_list(
     area: Rect,
 ) {
     if pipelines.is_empty() {
-        let empty_msg = Paragraph::new("No pipeline YAML files found in current directory")
+        let empty_msg = Paragraph::new(vec![
+            Line::from("No valid pipeline YAML files found in current directory."),
+            Line::from(""),
+            Line::from("Pipeline files must have:"),
+            Line::from("  - Extension: .yaml or .yml"),
+            Line::from("  - Required field: 'name'"),
+            Line::from("  - Required field: 'steps' (array)"),
+        ])
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default().borders(Borders::ALL).title("Pipelines"))
             .wrap(Wrap { trim: true });
@@ -153,4 +160,39 @@ pub fn render_footer(text: &str, frame: &mut Frame, area: Rect) {
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().borders(Borders::ALL).title("Help"));
     frame.render_widget(footer, area);
+}
+
+pub fn render_discovery_errors(errors: &[DiscoveryError], frame: &mut Frame, area: Rect) {
+    if errors.is_empty() {
+        return;
+    }
+
+    let error_lines: Vec<Line> = errors
+        .iter()
+        .flat_map(|err| {
+            vec![
+                Line::from(vec![
+                    Span::styled("✗ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::styled(&err.file_name, Style::default().fg(Color::Yellow)),
+                ]),
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(&err.error, Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(""),
+            ]
+        })
+        .collect();
+
+    let error_widget = Paragraph::new(error_lines)
+        .style(Style::default())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Discovery Errors")
+                .border_style(Style::default().fg(Color::Red)),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(error_widget, area);
 }

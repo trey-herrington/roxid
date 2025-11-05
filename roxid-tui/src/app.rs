@@ -24,8 +24,15 @@ pub struct App {
     pub should_quit: bool,
     pub execution_state: Option<ExecutionState>,
     pub event_receiver: Option<UnboundedReceiver<ExecutionEvent>>,
+    pub discovery_errors: Vec<DiscoveryError>,
     grpc_client: Option<PipelineServiceClient<tonic::transport::Channel>>,
     pending_execution: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveryError {
+    pub file_name: String,
+    pub error: String,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +55,7 @@ pub struct ExecutionState {
 impl App {
     pub async fn new() -> Result<Self> {
         let mut client = PipelineServiceClient::connect("http://[::1]:50051").await?;
-        let pipelines = Self::discover_pipelines(&mut client).await;
+        let (pipelines, discovery_errors) = Self::discover_pipelines(&mut client).await;
         Ok(Self {
             state: AppState::PipelineList,
             pipelines,
@@ -56,6 +63,7 @@ impl App {
             should_quit: false,
             execution_state: None,
             event_receiver: None,
+            discovery_errors,
             grpc_client: Some(client),
             pending_execution: false,
         })
@@ -79,46 +87,110 @@ impl App {
 
     async fn discover_pipelines(
         client: &mut PipelineServiceClient<tonic::transport::Channel>,
-    ) -> Vec<PipelineInfo> {
+    ) -> (Vec<PipelineInfo>, Vec<DiscoveryError>) {
         let mut pipelines = Vec::new();
+        let mut errors = Vec::new();
 
         // Explicitly use current working directory where user ran the command
         let current_dir = match std::env::current_dir() {
             Ok(dir) => dir,
-            Err(_) => return pipelines, // Can't determine current dir, return empty
+            Err(e) => {
+                errors.push(DiscoveryError {
+                    file_name: "<current directory>".to_string(),
+                    error: format!("Failed to get current directory: {}", e),
+                });
+                return (pipelines, errors);
+            }
         };
 
-        if let Ok(entries) = std::fs::read_dir(&current_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                
-                // Skip directories, only process files
-                if !path.is_file() {
-                    continue;
-                }
-                
-                if let Some(ext) = path.extension() {
-                    if ext == "yaml" || ext == "yml" {
-                        // Use absolute path for gRPC request
-                        let absolute_path = std::fs::canonicalize(&path)
-                            .unwrap_or_else(|_| path.clone())
-                            .to_string_lossy()
-                            .to_string();
-                        
-                        let parse_request = ParsePipelineRequest {
-                            source: Some(parse_pipeline_request::Source::FilePath(
-                                absolute_path,
-                            )),
-                        };
+        let entries = match std::fs::read_dir(&current_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                errors.push(DiscoveryError {
+                    file_name: current_dir.display().to_string(),
+                    error: format!("Failed to read directory: {}", e),
+                });
+                return (pipelines, errors);
+            }
+        };
 
-                        if let Ok(response) = client.parse_pipeline(parse_request).await {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            
+            // Skip directories, only process files
+            if !path.is_file() {
+                continue;
+            }
+            
+            if let Some(ext) = path.extension() {
+                if ext == "yaml" || ext == "yml" {
+                    let file_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    
+                    // Use absolute path for gRPC request
+                    let absolute_path = std::fs::canonicalize(&path)
+                        .unwrap_or_else(|_| path.clone())
+                        .to_string_lossy()
+                        .to_string();
+                    
+                    let parse_request = ParsePipelineRequest {
+                        source: Some(parse_pipeline_request::Source::FilePath(
+                            absolute_path,
+                        )),
+                    };
+
+                    match client.parse_pipeline(parse_request).await {
+                        Ok(response) => {
                             if let Some(pipeline) = response.into_inner().pipeline {
                                 pipelines.push(PipelineInfo {
                                     name: pipeline.name.clone(),
                                     path: path.clone(),
                                     description: pipeline.description.clone(),
                                 });
+                            } else {
+                                errors.push(DiscoveryError {
+                                    file_name,
+                                    error: "No pipeline returned from service".to_string(),
+                                });
                             }
+                        }
+                        Err(e) => {
+                            // Extract just the meaningful error message, strip the gRPC prefix
+                            let full_msg = format!("{}", e);
+                            
+                            // Try to extract just the message part
+                            let error_msg = if let Some(start) = full_msg.find("message: \"") {
+                                // Extract message between quotes
+                                let msg_start = start + 10; // length of "message: \""
+                                if let Some(end) = full_msg[msg_start..].find("\", details") {
+                                    let extracted = full_msg[msg_start..msg_start + end].to_string();
+                                    // Further clean up: remove "Failed to parse pipeline from file: " prefix
+                                    if let Some(yaml_err_start) = extracted.find("YAML error:") {
+                                        extracted[yaml_err_start..].to_string()
+                                    } else {
+                                        extracted
+                                    }
+                                } else if let Some(end) = full_msg[msg_start..].find('\"') {
+                                    let extracted = full_msg[msg_start..msg_start + end].to_string();
+                                    if let Some(yaml_err_start) = extracted.find("YAML error:") {
+                                        extracted[yaml_err_start..].to_string()
+                                    } else {
+                                        extracted
+                                    }
+                                } else {
+                                    full_msg.clone()
+                                }
+                            } else {
+                                full_msg.clone()
+                            };
+                            
+                            errors.push(DiscoveryError {
+                                file_name,
+                                error: error_msg,
+                            });
                         }
                     }
                 }
@@ -126,7 +198,7 @@ impl App {
         }
 
         pipelines.sort_by(|a, b| a.name.cmp(&b.name));
-        pipelines
+        (pipelines, errors)
     }
 
     pub fn move_up(&mut self) {
