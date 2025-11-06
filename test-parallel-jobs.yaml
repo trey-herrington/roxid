@@ -1,0 +1,40 @@
+name: parallel-jobs-pipeline
+description: Test parallel job execution
+
+stages:
+  - stage: parallel_work
+    display_name: Parallel Work Stage
+    jobs:
+      - job: job1
+        display_name: Job 1
+        steps:
+          - name: Job 1 Step 1
+            command: echo "Job 1 executing..."
+          - name: Job 1 Step 2
+            command: sleep 1 && echo "Job 1 complete"
+
+      - job: job2
+        display_name: Job 2
+        steps:
+          - name: Job 2 Step 1
+            command: echo "Job 2 executing..."
+          - name: Job 2 Step 2
+            command: sleep 1 && echo "Job 2 complete"
+
+      - job: job3
+        display_name: Job 3
+        steps:
+          - name: Job 3 Step 1
+            command: echo "Job 3 executing..."
+          - name: Job 3 Step 2
+            command: sleep 1 && echo "Job 3 complete"
+
+  - stage: final
+    display_name: Final Stage
+    depends_on: [parallel_work]
+    jobs:
+      - job: summary
+        display_name: Summary
+        steps:
+          - name: Print summary
+            command: echo "All parallel jobs completed!"

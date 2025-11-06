@@ -1,0 +1,10 @@
+name: legacy-pipeline
+description: Old style pipeline (backward compatibility test)
+
+steps:
+  - name: Step 1
+    command: echo "This is the old format"
+  - name: Step 2
+    command: echo "Should still work"
+  - name: Step 3
+    command: date

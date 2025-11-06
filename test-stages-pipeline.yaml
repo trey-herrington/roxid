@@ -1,0 +1,40 @@
+name: test-stages-pipeline
+description: Test pipeline with stages and jobs
+
+stages:
+  - stage: build
+    display_name: Build Stage
+    jobs:
+      - job: build_linux
+        display_name: Build on Linux
+        steps:
+          - name: Echo platform
+            command: echo "Building on Linux"
+          - name: Show date
+            command: date
+
+      - job: build_windows
+        display_name: Build on Windows
+        steps:
+          - name: Echo platform
+            command: echo "Building on Windows"
+          - name: Show time
+            command: date +%T
+
+  - stage: test
+    display_name: Test Stage
+    depends_on: [build]
+    jobs:
+      - job: unit_tests
+        display_name: Run Unit Tests
+        steps:
+          - name: Run tests
+            command: echo "Running unit tests..."
+          - name: Test result
+            command: echo "Tests passed!"
+
+      - job: integration_tests
+        display_name: Run Integration Tests
+        steps:
+          - name: Run integration tests
+            command: echo "Running integration tests..."

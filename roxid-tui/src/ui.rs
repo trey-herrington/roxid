@@ -31,8 +31,21 @@ fn render_execution(app: &App, frame: &mut Frame) {
     let chunks = layout::create_layout(frame.area());
 
     if let Some(exec_state) = &app.execution_state {
+        // Build header with stage and job info
+        let mut header_parts = vec![format!("Executing: {}", exec_state.pipeline_name)];
+        
+        if let Some(stage) = &exec_state.current_stage {
+            header_parts.push(format!("Stage: {}", stage));
+        }
+        
+        if let Some(job) = &exec_state.current_job {
+            header_parts.push(format!("Job: {}", job));
+        }
+        
+        let header_text = header_parts.join(" | ");
+        
         components::render_header(
-            &format!("Executing: {}", exec_state.pipeline_name),
+            &header_text,
             frame,
             chunks[0],
         );

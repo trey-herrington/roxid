@@ -1,5 +1,6 @@
 use color_eyre::Result;
 use ratatui::DefaultTerminal;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -8,7 +9,8 @@ use crate::ui;
 
 use pipeline_service::grpc::proto::{
     pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
-    ParsePipelineRequest, ExecutionEvent, execution_event::Event, StepStatus,
+    ParsePipelineRequest, ExecutionEvent, execution_event::Event, StepStatus, StageStatus, JobStatus,
+    Pipeline,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,14 @@ pub struct ExecutionState {
     pub output_lines: Vec<String>,
     pub is_complete: bool,
     pub success: bool,
+    pub current_stage: Option<String>,
+    pub current_job: Option<String>,
+    pub pipeline: Pipeline,
+    pub job_total_steps: HashMap<String, usize>,
+    pub step_to_job: HashMap<String, String>,
+    pub job_current_step: HashMap<String, usize>,
+    pub active_jobs: Vec<String>,
+    pub job_outputs: HashMap<String, Vec<String>>,
 }
 
 impl App {
@@ -245,14 +255,32 @@ impl App {
             .pipeline
             .ok_or_else(|| color_eyre::eyre::eyre!("No pipeline returned"))?;
 
+        // Count total steps from both formats
+        let total_steps = if !pipeline.stages.is_empty() {
+            pipeline.stages.iter()
+                .flat_map(|stage| &stage.jobs)
+                .flat_map(|job| &job.steps)
+                .count()
+        } else {
+            pipeline.steps.len()
+        };
+
         self.state = AppState::ExecutingPipeline;
         self.execution_state = Some(ExecutionState {
             pipeline_name: pipeline.name.clone(),
-            total_steps: pipeline.steps.len(),
+            total_steps,
             current_step: 0,
             output_lines: Vec::new(),
             is_complete: false,
             success: false,
+            current_stage: None,
+            current_job: None,
+            pipeline: pipeline.clone(),
+            job_total_steps: HashMap::new(),
+            step_to_job: HashMap::new(),
+            job_current_step: HashMap::new(),
+            active_jobs: Vec::new(),
+            job_outputs: HashMap::new(),
         });
 
         let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
@@ -295,18 +323,143 @@ impl App {
                                 .output_lines
                                 .push(format!("Pipeline '{}' started", started.name));
                         }
-                        Event::StepStarted(started) => {
-                            exec_state.current_step = started.step_index as usize + 1;
+                        Event::StageStarted(started) => {
+                            exec_state.current_stage = Some(started.stage_name.clone());
                             exec_state.output_lines.push(format!(
-                                "\n[Step {}/{}] {}",
-                                started.step_index + 1,
-                                exec_state.total_steps,
-                                started.step_name
+                                "\n🎭 Stage: {} (#{}) started",
+                                started.stage_name,
+                                started.stage_index + 1
                             ));
                         }
+                        Event::StageCompleted(completed) => {
+                            if let Some(result) = completed.result {
+                                let status_enum = StageStatus::try_from(result.status)
+                                    .unwrap_or(StageStatus::Pending);
+                                let status = match status_enum {
+                                    StageStatus::Success => "✓",
+                                    StageStatus::Failed => "✗",
+                                    _ => "?",
+                                };
+                                exec_state.output_lines.push(format!(
+                                    "  {} Stage '{}' completed in {:.2}s",
+                                    status,
+                                    result.stage_name,
+                                    result.duration_ms as f64 / 1000.0
+                                ));
+                            }
+                            exec_state.current_stage = None;
+                        }
+                        Event::JobStarted(started) => {
+                            exec_state.current_job = Some(started.job_name.clone());
+                            exec_state.active_jobs.push(started.job_name.clone());
+                            
+                            let job_start_msg = format!(
+                                "🔧 Job: {} (#{}) started",
+                                started.job_name,
+                                started.job_index + 1
+                            );
+                            
+                            let mut job_output = Vec::new();
+                            job_output.push(job_start_msg.clone());
+                            exec_state.job_outputs.insert(started.job_name.clone(), job_output);
+                            
+                            // Find the job in the pipeline to get its step count and map steps to this job
+                            if let Some(job) = exec_state
+                                .pipeline
+                                .stages
+                                .iter()
+                                .flat_map(|stage| &stage.jobs)
+                                .find(|job| job.job == started.job_name)
+                            {
+                                exec_state.job_total_steps.insert(started.job_name.clone(), job.steps.len());
+                                exec_state.job_current_step.insert(started.job_name.clone(), 0);
+                                
+                                // Map each step name to this job
+                                for step in &job.steps {
+                                    exec_state.step_to_job.insert(step.name.clone(), started.job_name.clone());
+                                }
+                            }
+                            
+                            exec_state.output_lines.push(format!("  {}", job_start_msg));
+                        }
+                        Event::JobCompleted(completed) => {
+                            if let Some(result) = completed.result {
+                                let status_enum = JobStatus::try_from(result.status)
+                                    .unwrap_or(JobStatus::Pending);
+                                let status = match status_enum {
+                                    JobStatus::Success => "✓",
+                                    JobStatus::Failed => "✗",
+                                    _ => "?",
+                                };
+                                
+                                let completion_msg = format!(
+                                    "{} Job '{}' completed in {:.2}s ({} steps)",
+                                    status,
+                                    result.job_name,
+                                    result.duration_ms as f64 / 1000.0,
+                                    result.step_results.len()
+                                );
+                                
+                                exec_state.output_lines.push(format!("    {}", completion_msg));
+                                
+                                // Add completion to job output
+                                if let Some(job_output) = exec_state.job_outputs.get_mut(&result.job_name) {
+                                    job_output.push(completion_msg);
+                                }
+                                
+                                // Remove from active jobs
+                                exec_state.active_jobs.retain(|j| j != &result.job_name);
+                            }
+                            exec_state.current_job = None;
+                        }
+                        Event::StepStarted(started) => {
+                            exec_state.current_step = started.step_index as usize + 1;
+                            
+                            // Look up which job this step belongs to
+                            if let Some(job_name) = exec_state.step_to_job.get(&started.step_name).cloned() {
+                                // Increment the step counter for this job
+                                let step_num = exec_state.job_current_step
+                                    .entry(job_name.clone())
+                                    .and_modify(|n| *n += 1)
+                                    .or_insert(1);
+                                let total = exec_state.job_total_steps.get(&job_name).copied().unwrap_or(0);
+                                
+                                let step_msg = format!(
+                                    "[Step {}/{}] {}",
+                                    step_num,
+                                    total,
+                                    started.step_name
+                                );
+                                
+                                exec_state.output_lines.push(format!("      {}", step_msg));
+                                
+                                // Add to job-specific output
+                                if let Some(job_output) = exec_state.job_outputs.get_mut(&job_name) {
+                                    job_output.push(step_msg);
+                                }
+                            } else {
+                                exec_state.output_lines.push(format!(
+                                    "      [Step ?/?] {}",
+                                    started.step_name
+                                ));
+                            }
+                        }
                         Event::StepOutput(output) => {
-                            for line in output.output.lines() {
-                                exec_state.output_lines.push(format!("  {}", line));
+                            // Look up which job this output belongs to via the step
+                            if let Some(job_name) = exec_state.current_job.as_ref() {
+                                for line in output.output.lines() {
+                                    let output_line = format!("  {}", line);
+                                    exec_state.output_lines.push(format!("      {}", output_line));
+                                    
+                                    // Add to job-specific output
+                                    if let Some(job_output) = exec_state.job_outputs.get_mut(job_name) {
+                                        job_output.push(output_line);
+                                    }
+                                }
+                            } else {
+                                for line in output.output.lines() {
+                                    exec_state.output_lines.push(format!("        {}", line));
+                                }
                             }
                         }
                         Event::StepCompleted(completed) => {
@@ -318,11 +471,21 @@ impl App {
                                     StepStatus::Failed => "✗",
                                     _ => "?",
                                 };
-                                exec_state.output_lines.push(format!(
-                                    "  {} Completed in {:.2}s",
+                                
+                                let completion_line = format!(
+                                    "{} Completed in {:.2}s",
                                     status,
                                     result.duration_ms as f64 / 1000.0
-                                ));
+                                );
+                                
+                                exec_state.output_lines.push(format!("        {}", completion_line));
+                                
+                                // Add to job-specific output
+                                if let Some(job_name) = exec_state.current_job.as_ref() {
+                                    if let Some(job_output) = exec_state.job_outputs.get_mut(job_name) {
+                                        job_output.push(format!("  {}", completion_line));
+                                    }
+                                }
                             }
                         }
                         Event::PipelineCompleted(completed) => {

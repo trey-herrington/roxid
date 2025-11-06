@@ -1,5 +1,7 @@
 use crate::pipeline::models::{
     Pipeline, Step, StepAction, StepResult, StepStatus,
+    StageResult, StageStatus, JobResult, JobStatus,
+    Stage, Job,
 };
 use crate::pipeline::executor::ExecutionEvent;
 
@@ -15,6 +17,34 @@ impl From<proto::Pipeline> for Pipeline {
             description: p.description,
             env: p.env,
             steps: p.steps.into_iter().map(Step::from).collect(),
+            stages: p.stages.into_iter().map(Stage::from).collect(),
+        }
+    }
+}
+
+impl From<proto::Stage> for Stage {
+    fn from(s: proto::Stage) -> Self {
+        Stage {
+            stage: s.stage,
+            display_name: s.display_name,
+            depends_on: s.depends_on,
+            condition: None,
+            jobs: s.jobs.into_iter().map(Job::from).collect(),
+        }
+    }
+}
+
+impl From<proto::Job> for Job {
+    fn from(j: proto::Job) -> Self {
+        Job {
+            job: j.job,
+            display_name: j.display_name,
+            depends_on: j.depends_on,
+            condition: None,
+            strategy: None,
+            pool: None,
+            env: j.env,
+            steps: j.steps.into_iter().map(Step::from).collect(),
         }
     }
 }
@@ -51,6 +81,30 @@ impl From<Pipeline> for proto::Pipeline {
             description: p.description,
             env: p.env,
             steps: p.steps.into_iter().map(proto::Step::from).collect(),
+            stages: p.stages.into_iter().map(proto::Stage::from).collect(),
+        }
+    }
+}
+
+impl From<Stage> for proto::Stage {
+    fn from(s: Stage) -> Self {
+        proto::Stage {
+            stage: s.stage,
+            display_name: s.display_name,
+            depends_on: s.depends_on,
+            jobs: s.jobs.into_iter().map(proto::Job::from).collect(),
+        }
+    }
+}
+
+impl From<Job> for proto::Job {
+    fn from(j: Job) -> Self {
+        proto::Job {
+            job: j.job,
+            display_name: j.display_name,
+            depends_on: j.depends_on,
+            env: j.env,
+            steps: j.steps.into_iter().map(proto::Step::from).collect(),
         }
     }
 }
@@ -92,6 +146,76 @@ impl From<StepStatus> for proto::StepStatus {
     }
 }
 
+impl From<StageStatus> for proto::StageStatus {
+    fn from(s: StageStatus) -> Self {
+        match s {
+            StageStatus::Pending => proto::StageStatus::Pending,
+            StageStatus::Running => proto::StageStatus::Running,
+            StageStatus::Success => proto::StageStatus::Success,
+            StageStatus::Failed => proto::StageStatus::Failed,
+            StageStatus::Skipped => proto::StageStatus::Skipped,
+        }
+    }
+}
+
+impl From<proto::StageStatus> for StageStatus {
+    fn from(s: proto::StageStatus) -> Self {
+        match s {
+            proto::StageStatus::Pending => StageStatus::Pending,
+            proto::StageStatus::Running => StageStatus::Running,
+            proto::StageStatus::Success => StageStatus::Success,
+            proto::StageStatus::Failed => StageStatus::Failed,
+            proto::StageStatus::Skipped => StageStatus::Skipped,
+        }
+    }
+}
+
+impl From<JobStatus> for proto::JobStatus {
+    fn from(s: JobStatus) -> Self {
+        match s {
+            JobStatus::Pending => proto::JobStatus::Pending,
+            JobStatus::Running => proto::JobStatus::Running,
+            JobStatus::Success => proto::JobStatus::Success,
+            JobStatus::Failed => proto::JobStatus::Failed,
+            JobStatus::Skipped => proto::JobStatus::Skipped,
+        }
+    }
+}
+
+impl From<proto::JobStatus> for JobStatus {
+    fn from(s: proto::JobStatus) -> Self {
+        match s {
+            proto::JobStatus::Pending => JobStatus::Pending,
+            proto::JobStatus::Running => JobStatus::Running,
+            proto::JobStatus::Success => JobStatus::Success,
+            proto::JobStatus::Failed => JobStatus::Failed,
+            proto::JobStatus::Skipped => JobStatus::Skipped,
+        }
+    }
+}
+
+impl From<StageResult> for proto::StageResult {
+    fn from(r: StageResult) -> Self {
+        proto::StageResult {
+            stage_name: r.stage_name,
+            status: i32::from(proto::StageStatus::from(r.status)),
+            duration_ms: r.duration.as_millis() as u64,
+            job_results: r.jobs.into_iter().map(proto::JobResult::from).collect(),
+        }
+    }
+}
+
+impl From<JobResult> for proto::JobResult {
+    fn from(r: JobResult) -> Self {
+        proto::JobResult {
+            job_name: r.job_name,
+            status: i32::from(proto::JobStatus::from(r.status)),
+            duration_ms: r.duration.as_millis() as u64,
+            step_results: r.steps.into_iter().map(proto::StepResult::from).collect(),
+        }
+    }
+}
+
 impl From<proto::StepStatus> for StepStatus {
     fn from(s: proto::StepStatus) -> Self {
         match s {
@@ -123,6 +247,34 @@ impl From<ExecutionEvent> for proto::ExecutionEvent {
             ExecutionEvent::PipelineStarted { name } => {
                 proto::execution_event::Event::PipelineStarted(proto::PipelineStarted { name })
             }
+            ExecutionEvent::StageStarted {
+                stage_name,
+                stage_index,
+            } => proto::execution_event::Event::StageStarted(proto::StageStarted {
+                stage_name,
+                stage_index: stage_index as u32,
+            }),
+            ExecutionEvent::StageCompleted {
+                result,
+                stage_index,
+            } => proto::execution_event::Event::StageCompleted(proto::StageCompleted {
+                result: Some(proto::StageResult::from(result)),
+                stage_index: stage_index as u32,
+            }),
+            ExecutionEvent::JobStarted {
+                job_name,
+                job_index,
+            } => proto::execution_event::Event::JobStarted(proto::JobStarted {
+                job_name,
+                job_index: job_index as u32,
+            }),
+            ExecutionEvent::JobCompleted {
+                result,
+                job_index,
+            } => proto::execution_event::Event::JobCompleted(proto::JobCompleted {
+                result: Some(proto::JobResult::from(result)),
+                job_index: job_index as u32,
+            }),
             ExecutionEvent::StepStarted {
                 step_name,
                 step_index,

@@ -27,7 +27,23 @@ message Pipeline {
     string name = 1;
     optional string description = 2;
     map<string, string> env = 3;
-    repeated Step steps = 4;
+    repeated Step steps = 4;  // For simple/legacy format
+    repeated Stage stages = 5;  // For stages/jobs format
+}
+
+message Stage {
+    string stage = 1;
+    optional string display_name = 2;
+    repeated string depends_on = 3;
+    repeated Job jobs = 4;
+}
+
+message Job {
+    string job = 1;
+    optional string display_name = 2;
+    repeated string depends_on = 3;
+    map<string, string> env = 4;
+    repeated Step steps = 5;
 }
 
 message Step {
@@ -52,15 +68,39 @@ message ShellScript {
 message ExecutionEvent {
     oneof event {
         PipelineStarted pipeline_started = 1;
-        StepStarted step_started = 2;
-        StepOutput step_output = 3;
-        StepCompleted step_completed = 4;
-        PipelineCompleted pipeline_completed = 5;
+        StageStarted stage_started = 2;
+        StageCompleted stage_completed = 3;
+        JobStarted job_started = 4;
+        JobCompleted job_completed = 5;
+        StepStarted step_started = 6;
+        StepOutput step_output = 7;
+        StepCompleted step_completed = 8;
+        PipelineCompleted pipeline_completed = 9;
     }
 }
 
 message PipelineStarted {
     string name = 1;
+}
+
+message StageStarted {
+    string stage_name = 1;
+    uint32 stage_index = 2;
+}
+
+message StageCompleted {
+    StageResult result = 1;
+    uint32 stage_index = 2;
+}
+
+message JobStarted {
+    string job_name = 1;
+    uint32 job_index = 2;
+}
+
+message JobCompleted {
+    JobResult result = 1;
+    uint32 job_index = 2;
 }
 
 message StepStarted {
@@ -93,6 +133,36 @@ enum StepStatus {
     STEP_STATUS_SUCCESS = 2;
     STEP_STATUS_FAILED = 3;
     STEP_STATUS_SKIPPED = 4;
+}
+
+message StageResult {
+    string stage_name = 1;
+    StageStatus status = 2;
+    uint64 duration_ms = 3;
+    repeated JobResult job_results = 4;
+}
+
+enum StageStatus {
+    STAGE_STATUS_PENDING = 0;
+    STAGE_STATUS_RUNNING = 1;
+    STAGE_STATUS_SUCCESS = 2;
+    STAGE_STATUS_FAILED = 3;
+    STAGE_STATUS_SKIPPED = 4;
+}
+
+message JobResult {
+    string job_name = 1;
+    JobStatus status = 2;
+    uint64 duration_ms = 3;
+    repeated StepResult step_results = 4;
+}
+
+enum JobStatus {
+    JOB_STATUS_PENDING = 0;
+    JOB_STATUS_RUNNING = 1;
+    JOB_STATUS_SUCCESS = 2;
+    JOB_STATUS_FAILED = 3;
+    JOB_STATUS_SKIPPED = 4;
 }
 
 message PipelineCompleted {

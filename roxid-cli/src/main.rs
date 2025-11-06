@@ -1,4 +1,5 @@
 use color_eyre::Result;
+use std::collections::HashMap;
 use std::env;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -156,14 +157,27 @@ async fn main() -> Result<()> {
     if let Some(desc) = &pipeline.description {
         println!("Description: {}", desc);
     }
-    println!("Steps: {}", pipeline.steps.len());
+    
+    // Count total steps from both formats
+    let _total_steps = if !pipeline.stages.is_empty() {
+        let step_count: usize = pipeline.stages.iter()
+            .flat_map(|stage| &stage.jobs)
+            .flat_map(|job| &job.steps)
+            .count();
+        println!("Stages: {}", pipeline.stages.len());
+        println!("Total Steps: {}", step_count);
+        step_count
+    } else {
+        println!("Steps: {}", pipeline.steps.len());
+        pipeline.steps.len()
+    };
     println!();
 
     let working_dir = env::current_dir()?.to_string_lossy().to_string();
 
     // Execute the pipeline
     let execute_request = ExecutePipelineRequest {
-        pipeline: Some(pipeline),
+        pipeline: Some(pipeline.clone()),
         working_dir,
     };
 
@@ -171,6 +185,11 @@ async fn main() -> Result<()> {
         .execute_pipeline(execute_request)
         .await?
         .into_inner();
+
+    // Track current job for step counting - use a map for parallel jobs
+    let mut job_step_counters: HashMap<String, usize> = HashMap::new();
+    let mut job_total_steps: HashMap<String, usize> = HashMap::new();
+    let mut step_to_job: HashMap<String, String> = HashMap::new();
 
     // Process events from the stream
     while let Some(event) = stream.message().await? {
@@ -180,36 +199,120 @@ async fn main() -> Result<()> {
                 Event::PipelineStarted(started) => {
                     println!("==> Pipeline started: {}\n", started.name);
                 }
-                Event::StepStarted(started) => {
+                Event::StageStarted(started) => {
                     println!(
-                        "[Step {}/...] Running: {}",
-                        started.step_index + 1,
-                        started.step_name
+                        "\n🎭 Stage #{}: {} started",
+                        started.stage_index + 1,
+                        started.stage_name
                     );
                 }
+                Event::StageCompleted(completed) => {
+                    if let Some(result) = completed.result {
+                        let status = proto::StageStatus::try_from(result.status)
+                            .unwrap_or(proto::StageStatus::Pending);
+                        println!(
+                            "   Stage '{}' - {:?} ({}ms, {} jobs)",
+                            result.stage_name,
+                            status,
+                            result.duration_ms,
+                            result.job_results.len()
+                        );
+                    }
+                }
+                Event::JobStarted(started) => {
+                    // Initialize step counter for this job
+                    job_step_counters.insert(started.job_name.clone(), 0);
+                    
+                    // Find the job in the pipeline to get its step count and map steps to this job
+                    if let Some(job) = pipeline
+                        .stages
+                        .iter()
+                        .flat_map(|stage| &stage.jobs)
+                        .find(|job| job.job == started.job_name)
+                    {
+                        job_total_steps.insert(started.job_name.clone(), job.steps.len());
+                        
+                        // Map each step name to this job
+                        for step in &job.steps {
+                            step_to_job.insert(step.name.clone(), started.job_name.clone());
+                        }
+                    }
+                    
+                    println!(
+                        "  🔧 Job #{}: {} started",
+                        started.job_index + 1,
+                        started.job_name
+                    );
+                }
+                Event::JobCompleted(completed) => {
+                    if let Some(result) = completed.result {
+                        let status = proto::JobStatus::try_from(result.status)
+                            .unwrap_or(proto::JobStatus::Pending);
+                        println!(
+                            "     Job '{}' - {:?} ({}ms, {} steps)",
+                            result.job_name,
+                            status,
+                            result.duration_ms,
+                            result.step_results.len()
+                        );
+                    }
+                }
+                Event::StepStarted(started) => {
+                    // Look up which job this step belongs to
+                    if let Some(job_name) = step_to_job.get(&started.step_name) {
+                        let counter = job_step_counters.entry(job_name.clone()).or_insert(0);
+                        *counter += 1;
+                        let total = job_total_steps.get(job_name).copied().unwrap_or(0);
+                        
+                        println!(
+                            "      [Step {}/{}] Running: {}",
+                            counter,
+                            total,
+                            started.step_name
+                        );
+                    } else {
+                        println!("      [Step ?/?] Running: {}", started.step_name);
+                    }
+                }
                 Event::StepOutput(output) => {
-                    println!("  | {}", output.output);
+                    println!("        | {}", output.output);
                 }
                 Event::StepCompleted(completed) => {
                     if let Some(result) = completed.result {
                         let status = proto::StepStatus::try_from(result.status)
                             .unwrap_or(proto::StepStatus::Pending);
-                        println!(
-                            "[Step {}/...] {} - {:?} ({}ms, exit code: {:?})",
-                            completed.step_index + 1,
-                            result.step_name,
-                            status,
-                            result.duration_ms,
-                            result.exit_code
-                        );
-                        if let Some(error) = &result.error {
-                            println!("  Error: {}", error);
+                        
+                        // Look up which job this step belongs to
+                        if let Some(job_name) = step_to_job.get(&result.step_name) {
+                            let counter = job_step_counters.get(job_name).copied().unwrap_or(0);
+                            let total = job_total_steps.get(job_name).copied().unwrap_or(0);
+                            
+                            println!(
+                                "      [Step {}/{}] {} - {:?} ({}ms, exit code: {:?})",
+                                counter,
+                                total,
+                                result.step_name,
+                                status,
+                                result.duration_ms,
+                                result.exit_code
+                            );
+                        } else {
+                            println!(
+                                "      [Step ?/?] {} - {:?} ({}ms, exit code: {:?})",
+                                result.step_name,
+                                status,
+                                result.duration_ms,
+                                result.exit_code
+                            );
                         }
-                        println!();
+                        
+                        if let Some(error) = &result.error {
+                            println!("        Error: {}", error);
+                        }
                     }
                 }
                 Event::PipelineCompleted(completed) => {
-                    println!("==> Pipeline completed!");
+                    println!("\n==> Pipeline completed!");
                     println!("Total steps: {}", completed.total_steps);
                     println!("Failed steps: {}", completed.failed_steps);
                     println!(
