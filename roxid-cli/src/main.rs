@@ -8,7 +8,7 @@ pub mod proto {
 }
 
 use proto::{
-    pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
+    parse_pipeline_request, pipeline_service_client::PipelineServiceClient, ExecutePipelineRequest,
     ParsePipelineRequest,
 };
 
@@ -30,7 +30,7 @@ fn stop_service() {
             .arg("pipeline-service")
             .output();
     }
-    
+
     #[cfg(windows)]
     {
         use std::process::Command;
@@ -43,27 +43,27 @@ fn stop_service() {
 // Start the gRPC service in the background
 fn start_service() -> Result<bool> {
     let exe_path = env::current_exe()?;
-    let exe_dir = exe_path.parent().ok_or_else(|| {
-        color_eyre::eyre::eyre!("Failed to get executable directory")
-    })?;
-    
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get executable directory"))?;
+
     let service_path = exe_dir.join("pipeline-service");
-    
+
     if !service_path.exists() {
         return Err(color_eyre::eyre::eyre!(
             "pipeline-service binary not found at: {}. Make sure both binaries are installed.",
             service_path.display()
         ));
     }
-    
+
     println!("Starting pipeline service...");
-    
+
     Command::new(&service_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    
+
     // Wait for service to be ready
     for i in 0..30 {
         if is_service_running() {
@@ -72,10 +72,12 @@ fn start_service() -> Result<bool> {
         }
         std::thread::sleep(Duration::from_millis(500));
         if i == 29 {
-            return Err(color_eyre::eyre::eyre!("Service failed to start after 15 seconds"));
+            return Err(color_eyre::eyre::eyre!(
+                "Service failed to start after 15 seconds"
+            ));
         }
     }
-    
+
     Ok(true)
 }
 
@@ -98,13 +100,13 @@ async fn main() -> Result<()> {
     if args.len() == 1 {
         let we_started_service = ensure_service_running().await?;
         let result = roxid_tui::run().await;
-        
+
         // Stop service if we started it
         if we_started_service {
             println!("Stopping service...");
             stop_service();
         }
-        
+
         return result;
     }
 
@@ -167,10 +169,7 @@ async fn main() -> Result<()> {
         working_dir,
     };
 
-    let mut stream = client
-        .execute_pipeline(execute_request)
-        .await?
-        .into_inner();
+    let mut stream = client.execute_pipeline(execute_request).await?.into_inner();
 
     // Process events from the stream
     while let Some(event) = stream.message().await? {

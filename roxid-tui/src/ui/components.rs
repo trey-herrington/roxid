@@ -34,9 +34,9 @@ pub fn render_pipeline_list(
             Line::from("  - Required field: 'name'"),
             Line::from("  - Required field: 'steps' (array)"),
         ])
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title("Pipelines"))
-            .wrap(Wrap { trim: true });
+        .style(Style::default().fg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).title("Pipelines"))
+        .wrap(Wrap { trim: true });
         frame.render_widget(empty_msg, area);
         return;
     }
@@ -172,7 +172,10 @@ pub fn render_discovery_errors(errors: &[DiscoveryError], frame: &mut Frame, are
         .flat_map(|err| {
             vec![
                 Line::from(vec![
-                    Span::styled("✗ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "✗ ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(&err.file_name, Style::default().fg(Color::Yellow)),
                 ]),
                 Line::from(vec![

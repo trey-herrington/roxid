@@ -3,8 +3,8 @@ use pipeline_service::grpc::proto::{
     ExecutePipelineRequest, ExecutionEvent, ParsePipelineRequest, ParsePipelineResponse,
 };
 use pipeline_service::pipeline::{ExecutionContext, PipelineExecutor, PipelineParser};
-use tonic::{transport::Server, Request, Response, Status};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tonic::{transport::Server, Request, Response, Status};
 
 #[derive(Debug, Default)]
 pub struct PipelineServiceImpl;
@@ -18,11 +18,11 @@ impl PipelineService for PipelineServiceImpl {
         let req = request.into_inner();
 
         let pipeline = match req.source {
-            Some(pipeline_service::grpc::proto::parse_pipeline_request::Source::FilePath(
-                path,
-            )) => PipelineParser::from_file(&path).map_err(|e| {
-                Status::invalid_argument(format!("Failed to parse pipeline from file: {}", e))
-            })?,
+            Some(pipeline_service::grpc::proto::parse_pipeline_request::Source::FilePath(path)) => {
+                PipelineParser::from_file(&path).map_err(|e| {
+                    Status::invalid_argument(format!("Failed to parse pipeline from file: {}", e))
+                })?
+            }
             Some(pipeline_service::grpc::proto::parse_pipeline_request::Source::Content(
                 content,
             )) => PipelineParser::parse(&content).map_err(|e| {
@@ -53,10 +53,7 @@ impl PipelineService for PipelineServiceImpl {
             .ok_or_else(|| Status::invalid_argument("Pipeline is required"))?
             .into();
 
-        let context = ExecutionContext::new(
-            req.working_dir.clone(),
-            req.working_dir,
-        );
+        let context = ExecutionContext::new(req.working_dir.clone(), req.working_dir);
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let (grpc_tx, grpc_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -85,7 +82,7 @@ impl PipelineService for PipelineServiceImpl {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "[::1]:50051".parse()?;
-    let service = PipelineServiceImpl::default();
+    let service = PipelineServiceImpl;
 
     println!("Pipeline gRPC server listening on {}", addr);
 

@@ -16,10 +16,10 @@ pub fn create_layout_with_errors(area: Rect) -> Vec<Rect> {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),    // Header
+            Constraint::Length(3),      // Header
             Constraint::Percentage(60), // Main content
             Constraint::Percentage(40), // Errors
-            Constraint::Length(3),    // Footer
+            Constraint::Length(3),      // Footer
         ])
         .split(area)
         .to_vec()

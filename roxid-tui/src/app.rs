@@ -7,8 +7,8 @@ use crate::events::EventHandler;
 use crate::ui;
 
 use pipeline_service::grpc::proto::{
-    pipeline_service_client::PipelineServiceClient, parse_pipeline_request, ExecutePipelineRequest,
-    ParsePipelineRequest, ExecutionEvent, execution_event::Event, StepStatus,
+    execution_event::Event, parse_pipeline_request, pipeline_service_client::PipelineServiceClient,
+    ExecutePipelineRequest, ExecutionEvent, ParsePipelineRequest, StepStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,13 +73,13 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(self, frame))?;
             self.handle_events()?;
-            
+
             // Handle pending execution request
             if self.pending_execution {
                 self.pending_execution = false;
                 self.execute_selected_pipeline().await?;
             }
-            
+
             self.process_execution_events().await;
         }
         Ok(())
@@ -116,12 +116,12 @@ impl App {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            
+
             // Skip directories, only process files
             if !path.is_file() {
                 continue;
             }
-            
+
             if let Some(ext) = path.extension() {
                 if ext == "yaml" || ext == "yml" {
                     let file_name = path
@@ -129,17 +129,15 @@ impl App {
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown")
                         .to_string();
-                    
+
                     // Use absolute path for gRPC request
                     let absolute_path = std::fs::canonicalize(&path)
                         .unwrap_or_else(|_| path.clone())
                         .to_string_lossy()
                         .to_string();
-                    
+
                     let parse_request = ParsePipelineRequest {
-                        source: Some(parse_pipeline_request::Source::FilePath(
-                            absolute_path,
-                        )),
+                        source: Some(parse_pipeline_request::Source::FilePath(absolute_path)),
                     };
 
                     match client.parse_pipeline(parse_request).await {
@@ -160,13 +158,14 @@ impl App {
                         Err(e) => {
                             // Extract just the meaningful error message, strip the gRPC prefix
                             let full_msg = format!("{}", e);
-                            
+
                             // Try to extract just the message part
                             let error_msg = if let Some(start) = full_msg.find("message: \"") {
                                 // Extract message between quotes
                                 let msg_start = start + 10; // length of "message: \""
                                 if let Some(end) = full_msg[msg_start..].find("\", details") {
-                                    let extracted = full_msg[msg_start..msg_start + end].to_string();
+                                    let extracted =
+                                        full_msg[msg_start..msg_start + end].to_string();
                                     // Further clean up: remove "Failed to parse pipeline from file: " prefix
                                     if let Some(yaml_err_start) = extracted.find("YAML error:") {
                                         extracted[yaml_err_start..].to_string()
@@ -174,7 +173,8 @@ impl App {
                                         extracted
                                     }
                                 } else if let Some(end) = full_msg[msg_start..].find('\"') {
-                                    let extracted = full_msg[msg_start..msg_start + end].to_string();
+                                    let extracted =
+                                        full_msg[msg_start..msg_start + end].to_string();
                                     if let Some(yaml_err_start) = extracted.find("YAML error:") {
                                         extracted[yaml_err_start..].to_string()
                                     } else {
@@ -186,7 +186,7 @@ impl App {
                             } else {
                                 full_msg.clone()
                             };
-                            
+
                             errors.push(DiscoveryError {
                                 file_name,
                                 error: error_msg,
@@ -212,7 +212,7 @@ impl App {
             self.selected_index += 1;
         }
     }
-    
+
     pub fn request_execute_pipeline(&mut self) {
         self.pending_execution = true;
     }

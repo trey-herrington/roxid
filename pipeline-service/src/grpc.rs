@@ -1,7 +1,5 @@
-use crate::pipeline::models::{
-    Pipeline, Step, StepAction, StepResult, StepStatus,
-};
 use crate::pipeline::executor::ExecutionEvent;
+use crate::pipeline::models::{Pipeline, Step, StepAction, StepResult, StepStatus};
 
 pub mod proto {
     tonic::include_proto!("pipeline");
@@ -23,7 +21,10 @@ impl From<proto::Step> for Step {
     fn from(s: proto::Step) -> Self {
         Step {
             name: s.name,
-            action: s.action.map(StepAction::from).unwrap_or(StepAction::Command(String::new())),
+            action: s
+                .action
+                .map(StepAction::from)
+                .unwrap_or(StepAction::Command(String::new())),
             env: s.env,
             continue_on_error: s.continue_on_error,
         }
@@ -133,13 +134,12 @@ impl From<ExecutionEvent> for proto::ExecutionEvent {
             ExecutionEvent::StepOutput { step_name, output } => {
                 proto::execution_event::Event::StepOutput(proto::StepOutput { step_name, output })
             }
-            ExecutionEvent::StepCompleted {
-                result,
-                step_index,
-            } => proto::execution_event::Event::StepCompleted(proto::StepCompleted {
-                result: Some(proto::StepResult::from(result)),
-                step_index: step_index as u32,
-            }),
+            ExecutionEvent::StepCompleted { result, step_index } => {
+                proto::execution_event::Event::StepCompleted(proto::StepCompleted {
+                    result: Some(proto::StepResult::from(result)),
+                    step_index: step_index as u32,
+                })
+            }
             ExecutionEvent::PipelineCompleted {
                 success,
                 total_steps,
