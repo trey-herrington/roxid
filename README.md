@@ -1,6 +1,8 @@
 # Roxid
 
-A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui.rs/) for managing and executing YAML-based pipelines via gRPC.
+A 100% Azure DevOps Pipelines compatible local execution environment with an interactive Terminal UI built with [Ratatui](https://ratatui.rs/).
+
+Run actual `azure-pipelines.yml` files locally and write unit tests for pipeline logic.
 
 ## Table of Contents
 
@@ -9,51 +11,62 @@ A Terminal User Interface (TUI) application built with [Ratatui](https://ratatui
 - [Installation](#installation)
 - [Usage](#usage)
 - [Architecture](#architecture)
-- [Pipeline System](#pipeline-system)
+- [Pipeline Format](#pipeline-format)
+- [Testing Pipelines](#testing-pipelines)
 - [TUI Guide](#tui-guide)
-- [Extending the Application](#extending-the-application)
 - [Project Structure](#project-structure)
 - [Resources](#resources)
 
 ## Features
 
+### Azure DevOps Compatibility
+- **Full YAML schema support**: Stages, jobs, steps, variables, parameters, resources, triggers
+- **Expression engine**: All three expression types - `${{ }}` compile-time, `$[ ]` runtime, `$(var)` macro substitution
+- **Built-in functions**: `eq`, `ne`, `contains`, `startsWith`, `format`, `join`, `replace`, `coalesce`, `iif`, status checks, and more
+- **Template system**: Template resolution with `extends`, `${{ if }}`, `${{ each }}`, cross-repo templates, parameter validation
+- **DAG execution**: Dependency-based stage/job ordering with `dependsOn`, parallel execution, and `maxParallel`
+- **Matrix strategies**: Full matrix expansion with inline definitions
+- **Condition evaluation**: Azure DevOps condition expressions on stages, jobs, and steps
+
+### Runners
+- **Shell runner**: `script`, `bash`, `pwsh`, `powershell` step types with real-time output streaming
+- **Task runner**: Download and execute Azure DevOps tasks (e.g., `Bash@3`, `PowerShell@2`) from the marketplace
+- **Container runner**: Docker-based container job execution with service containers, volume mounting, and port mapping
+
+### Testing Framework
+- **Test definitions**: YAML-based test suites (`roxid-test.yml`) with pipeline-level assertions
+- **Assertions**: `pipeline_succeeded`, `step_succeeded`, `step_output_equals`, `step_ran_before`, `variable_equals`, and more
+- **Multiple output formats**: JUnit XML, TAP, and terminal output
+- **Test discovery**: Automatic discovery of `roxid-test.yml` files
+- **Filtering**: Glob-based test name filtering with fail-fast support
+
 ### TUI Features
-- **Pipeline Discovery**: Automatically discovers pipeline YAML files in the current directory
-- **Interactive Selection**: Navigate through available pipelines with keyboard controls
-- **Real-time Execution**: Execute pipelines with live progress tracking via gRPC streaming
-- **Progress Visualization**: Visual progress bar showing current step
-- **Live Output**: Real-time output display during pipeline execution
-- **Error Handling**: Uses color-eyre for better error reporting
+- **Pipeline discovery**: Automatically discovers pipeline YAML files in the current directory
+- **Pipeline tree view**: Expandable stages, jobs, and steps with type indicators
+- **Real-time execution**: Live progress bar, stage panel, and output panel
+- **Log viewer**: Scrollable, searchable output with filtering
+- **Test results panel**: Summary bar with pass/fail list
+- **Variable editor**: Edit variables before execution
 - **Cross-platform**: Works on Linux, macOS, and Windows
-
-### Pipeline Features
-- **YAML-based pipeline definitions**: Simple, declarative syntax
-- **Command and shell script execution**: Run single commands or multi-line scripts
-- **Environment variable support**: Pipeline-level and step-level env vars
-- **Real-time progress reporting**: Live updates via gRPC streaming
-- **Error handling**: Continue on error support for non-critical steps
-
-### gRPC Service
-- **Remote execution**: Pipeline execution via gRPC service
-- **Streaming updates**: Real-time execution events streamed to clients
-- **Language-agnostic**: Any language with gRPC support can be a client
-- **Scalable architecture**: Service can be deployed independently
 
 ## Quick Start
 
-Just run `roxid` - the service auto-starts and auto-stops!
-
 ```bash
-# Launch TUI (auto-starts service, stops when you quit)
+# Launch TUI (default)
 roxid
 
-# Or run a specific pipeline (auto-starts service, stops when done)
-roxid run example-pipeline.yaml
+# Run a specific pipeline
+roxid run azure-pipelines.yml
+
+# Run with variable overrides
+roxid run azure-pipelines.yml --var "buildConfiguration=Release"
+
+# Run tests
+roxid test
+
+# Validate a pipeline
+roxid validate azure-pipelines.yml
 ```
-
-That's it! The service automatically starts when needed and stops when you're done.
-
-**For more details, see the [Usage](#usage) section below.**
 
 ## Installation
 
@@ -64,30 +77,7 @@ cargo install roxid
 roxid
 ```
 
-### Option 2: Pre-built Binary
-
-Download from [Releases](https://github.com/yourusername/roxid/releases/latest):
-- **Linux x86_64**: `roxid-linux-x86_64.tar.gz`
-- **macOS Intel**: `roxid-macos-x86_64.tar.gz`
-- **macOS Apple Silicon**: `roxid-macos-aarch64.tar.gz`
-- **Windows**: `roxid-windows-x86_64.exe.zip`
-
-**Linux/macOS:**
-```bash
-tar xzf roxid-*.tar.gz
-sudo mv roxid-* /usr/local/bin/roxid
-chmod +x /usr/local/bin/roxid
-```
-
-**Windows:** Extract ZIP and add to PATH.
-
-### Option 3: From Git
-
-```bash
-cargo install --git https://github.com/yourusername/roxid
-```
-
-### Option 4: Build from Source
+### Option 2: Build from Source
 
 ```bash
 git clone https://github.com/yourusername/roxid
@@ -114,701 +104,376 @@ sudo rm /usr/local/bin/roxid
 
 ## Usage
 
-### The Simplest Way
-
-Just type `roxid` - service starts automatically and stops when you're done!
+### CLI Commands
 
 ```bash
-# Launch TUI
-roxid
+# Run a pipeline
+roxid run azure-pipelines.yml
+roxid run azure-pipelines.yml --var "foo=bar"
+roxid run azure-pipelines.yml --stage Build
 
-# Or run a pipeline
-roxid run my-pipeline.yaml
+# Test pipelines
+roxid test                           # Run all tests in roxid-test.yml
+roxid test --filter "deploy*"        # Filter tests by name
+roxid test --output junit            # JUnit XML output
+roxid test --output tap              # TAP output
+
+# Validate pipelines
+roxid validate azure-pipelines.yml   # Check syntax and references
+roxid validate --templates           # Validate template resolution
+
+# TUI mode
+roxid tui                            # Launch interactive TUI
+roxid                                # Default: launches TUI
+
+# Task management
+roxid task list                      # List cached tasks
+roxid task fetch Bash@3              # Pre-download a task
+roxid task clear                     # Clear task cache
+roxid task path                      # Show task cache path
 ```
-
-**Smart service management:**
-- If service isn't running → starts it for you
-- When you quit/finish → stops it automatically
-- If service was already running → leaves it running
 
 ### TUI Controls
 
-**Pipeline List Screen:**
-- `↑` or `k` - Move selection up
-- `↓` or `j` - Move selection down
-- `Enter` - Execute selected pipeline
-- `q` or `Esc` - Quit application
-
-**Pipeline Execution Screen:**
-- `q` or `Esc` - Return to pipeline list (only after completion)
-
-### CLI Pipeline Execution
-
-Run pipelines directly from command line:
-
-```bash
-roxid run example-pipeline.yaml
-```
-
-### Alternative: Manual Service Management
-
-For development or debugging, you can manage the service manually:
-
-```bash
-# Terminal 1: Start service
-cargo run --bin pipeline-service
-
-# Terminal 2: Run TUI or CLI
-cargo run --bin roxid
-cargo run --bin roxid run pipeline.yaml
-```
-
-### Alternative: Auto-Start Scripts
-
-If running from source, convenience scripts are available:
-
-```bash
-./start-tui.sh              # Starts service, runs TUI, stops service
-./run-pipeline.sh file.yaml # Starts service, runs pipeline, stops service
-```
-
-### Troubleshooting
-
-**"Connection refused" error:**
-- The service isn't running
-- Solution: Just run `roxid` - it auto-starts the service
-
-**"Address already in use" error:**
-- Another service instance is running
-- Solution: `pkill -f pipeline-service` then retry
-
-**"No such file or directory" when parsing pipeline:**
-- Pipeline file not found
-- Solution: Use absolute path or run from correct directory
-
-### Service Management
-
-```bash
-# Check if service is running
-lsof -ti:50051
-
-# Stop service manually (if needed)
-pkill -f pipeline-service
-
-# View service logs (when using scripts)
-tail -f /tmp/pipeline-service.log
-```
+| Key | Action |
+|-----|--------|
+| `↑/k` | Move up |
+| `↓/j` | Move down |
+| `Enter` | Execute/Expand |
+| `Tab` | Switch panels |
+| `v` | Edit variables |
+| `t` | Run tests |
+| `l` | View logs |
+| `/` | Search |
+| `q/Esc` | Back/Quit |
 
 ## Architecture
 
 ### Workspace Structure
 
-This workspace follows a gRPC-based microservice architecture:
+Roxid is a Rust workspace with three crates that communicate via direct library calls:
 
 ```
 roxid/
-├── Cargo.toml              # Workspace manifest
-├── pipeline-service/       # gRPC service (library + binary)
-│   ├── Cargo.toml
-│   ├── build.rs            # Proto compilation
-│   ├── proto/
-│   │   └── pipeline.proto  # gRPC service definition
+├── Cargo.toml              # Workspace manifest (resolver v2)
+├── pipeline-service/       # Core library (v0.8.0)
 │   └── src/
-│       ├── lib.rs          # Library entry point
-│       ├── grpc.rs         # Proto conversions and types
-│       ├── error.rs        # Error types
-│       ├── pipeline/       # Pipeline execution engine
-│       └── bin/
-│           └── server.rs   # gRPC server binary
-├── roxid-tui/              # Terminal UI (gRPC client)
-│   ├── Cargo.toml
-│   ├── build.rs            # Proto compilation
+│       ├── lib.rs          # Public API re-exports
+│       ├── error.rs        # ServiceError, ServiceResult
+│       ├── parser/         # Azure DevOps YAML parser, models, templates
+│       ├── expression/     # Expression engine (lexer, parser, evaluator, functions)
+│       ├── execution/      # DAG builder, executor, matrix, context, events
+│       ├── runners/        # Shell, task, and container runners
+│       ├── tasks/          # Task cache and manifest parsing
+│       ├── testing/        # Test runner, assertions, parser, reporter
+│       └── workflow/       # GitHub Actions workflow support (future)
+├── roxid-tui/              # Terminal UI (v0.8.0, library + binary)
 │   └── src/
-│       ├── main.rs         # Entry point
-│       ├── app.rs          # Application state and gRPC client
-│       ├── events.rs       # Event handling (keyboard, mouse)
-│       └── ui/             # UI rendering modules
-└── roxid-cli/              # CLI application (gRPC client)
-    ├── Cargo.toml
-    ├── build.rs            # Proto compilation
+│       ├── lib.rs, main.rs # Entry points
+│       ├── app.rs          # Application state machine
+│       ├── events.rs       # Keyboard event handling
+│       ├── ui.rs           # UI module root
+│       └── ui/             # UI components
+│           ├── layout.rs, components.rs
+│           ├── pipeline_list.rs, pipeline_tree.rs
+│           ├── execution.rs, log_viewer.rs
+│           └── test_results.rs
+└── roxid-cli/              # CLI entry point (v0.8.0, `roxid` binary, clap-based)
     └── src/
-        └── main.rs         # CLI entry point with gRPC client
+        ├── main.rs         # CLI entry point
+        ├── output.rs       # Terminal formatting helpers
+        └── commands/       # run, test, validate, task subcommands
 ```
+
+### Dependency Graph
+
+```
+roxid-cli ──→ roxid-tui ──→ pipeline-service
+     └─────────────────────────→ (also depends directly)
+```
+
+All communication is via direct Rust library calls. There is no RPC, gRPC, or network protocol involved.
 
 ### Architecture Layers
 
-#### 1. **Pipeline Service** (`pipeline-service/`)
-- **Purpose**: gRPC service for pipeline execution
-- **Type**: Library crate + binary executable
+#### 1. pipeline-service (Core Library)
+- **Purpose**: Core pipeline parsing, expression evaluation, execution, and testing
+- **Type**: Library crate
 - **Components**:
-  - **Library**: Core pipeline execution engine and proto conversions
-  - **Binary**: gRPC server listening on port 50051
-  - **Proto**: Service definition with streaming execution events
-- **Features**:
-  - Parse pipelines from files or strings
-  - Stream execution events in real-time
-  - Independent, language-agnostic service
-- **Structure**:
-  - `models/`: Data structures and domain models
-  - `pipeline/`: Pipeline execution system
-  - `services/`: Business logic implementations
-  - `error.rs`: Domain-specific error types
+  - **Parser**: Azure DevOps YAML parser with template resolution and validation
+  - **Expression Engine**: Full `${{ }}`, `$[ ]`, `$(var)` support with built-in functions
+  - **Execution Engine**: DAG-based scheduling with parallel execution and matrix expansion
+  - **Runners**: Shell, task, and container runners for step execution
+  - **Task Cache**: Download and cache Azure DevOps tasks from the marketplace
+  - **Testing Framework**: Test definitions, assertions, runner, and reporters
 
-#### 2. **TUI Package** (`roxid-tui/`)
-- **Purpose**: Terminal user interface (gRPC client)
-- **Type**: Binary crate (executable)
-- **Dependencies**: gRPC client connecting to pipeline-service
-- **Structure**:
-  - `main.rs`: Application entry point
-  - `app.rs`: Application state and gRPC client management
-  - `events.rs`: User input handling
-  - `ui/`: UI rendering logic
+#### 2. roxid-tui (Terminal UI)
+- **Purpose**: Interactive terminal interface for pipeline management
+- **Type**: Library + binary crate
+- **Dependencies**: Direct library calls to `pipeline-service`
+- **States**: PipelineList, PipelineDetail, ExecutingPipeline, ExecutionLog, TestResults, VariableEditor
 
-#### 3. **CLI Package** (`roxid-cli/`)
-- **Purpose**: Command-line interface (gRPC client)
-- **Type**: Binary crate (executable)
-- **Dependencies**: gRPC client connecting to pipeline-service
-- **Structure**:
-  - `main.rs`: CLI entry point with gRPC client
+#### 3. roxid-cli (CLI)
+- **Purpose**: Command-line interface for pipeline execution
+- **Type**: Binary crate (`roxid`)
+- **Dependencies**: Direct library calls to `pipeline-service` and `roxid-tui`
+- **Framework**: clap 4 with derive macros
 
-### Communication Architecture
+### Communication
 
 ```
-┌─────────────┐         gRPC          ┌──────────────────┐
-│  roxid-tui  │ ◄──────────────────► │ pipeline-service │
-│  (client)   │    Streaming Events   │   (gRPC server)  │
-└─────────────┘                       └──────────────────┘
-                                               ▲
-┌─────────────┐         gRPC                  │
-│  roxid-cli  │ ◄────────────────────────────┘
-│  (client)   │    Streaming Events
+┌─────────────┐                        ┌──────────────────┐
+│  roxid-cli  │──── library calls ────→│ pipeline-service │
+│  (binary)   │                        │  (core library)  │
+└──────┬──────┘                        └──────────────────┘
+       │                                        ▲
+       │ library calls                          │
+       ▼                                        │
+┌─────────────┐──── library calls ──────────────┘
+│  roxid-tui  │
+│  (lib+bin)  │
 └─────────────┘
 ```
 
-**Key Architectural Benefits**:
-- **Service Independence**: Pipeline service runs independently, can be deployed remotely
-- **Language Agnostic**: Any language with gRPC support can build clients
-- **Streaming**: Real-time execution updates via gRPC streaming
-- **Scalability**: Service can handle multiple concurrent clients
-- **Clean Separation**: Clear boundary between service and clients
-- **Testability**: Service and clients can be tested independently
+### Application Flow
 
-### gRPC Service Definition
+1. **Initialization**: Discovers pipeline YAML files using `AzureParser::parse_file()` and `normalize_pipeline()`
+2. **Pipeline List**: Browse discovered pipelines with stage/job/step counts
+3. **Pipeline Detail**: Expandable tree view of stages, jobs, and steps
+4. **Execution**: Spawns tokio task with progress channel (`ExecutionEvent` streaming) for real-time updates
+5. **Results**: View logs, test results, and execution status
 
-The service provides two RPCs:
+The TUI uses a `pending_execution`/`pending_test_run` flag pattern to bridge synchronous keyboard handlers to the async main loop.
 
-1. **ParsePipeline**: Parse a pipeline from file path or string content
-2. **ExecutePipeline**: Execute a pipeline with streaming progress events
+## Pipeline Format
 
-Events streamed during execution:
-- `PipelineStarted`: Pipeline execution begins
-- `StepStarted`: A step starts executing
-- `StepOutput`: Real-time output from step
-- `StepCompleted`: Step finishes with result
-- `PipelineCompleted`: All steps complete
-
-### TUI Application Flow
-
-1. **Initialization**:
-   - Connects to gRPC service on startup
-   - Discovers available pipeline YAML files via gRPC
-   
-2. **Pipeline List State**: 
-   - Displays available pipeline YAML files
-   - User navigates with arrow keys and selects with Enter
-   
-3. **Pipeline Execution State**:
-   - Sends execute request to gRPC service
-   - Displays real-time progress bar (current step / total steps)
-   - Receives and displays streamed execution events
-   - Shows completion status (success/failure)
-
-4. **Event Loop**: The main loop continuously:
-   - Draws the UI based on current state
-   - Handles keyboard events with non-blocking polling
-   - Processes incoming gRPC stream events
-   
-5. **gRPC Communication**: 
-   - TUI maintains persistent connection to pipeline-service
-   - Uses gRPC streaming for real-time execution updates
-   - Automatically handles connection errors and retries
-
-### State Machine
-```
-┌─────────────────┐
-│ PipelineList    │
-│ - Discover YAML │
-│ - Navigate      │
-│ - Select        │
-└────────┬────────┘
-         │ Enter
-         ▼
-┌─────────────────┐
-│ ExecutingPipe   │
-│ - Run pipeline  │
-│ - Show progress │
-│ - Stream output │
-└────────┬────────┘
-         │ Complete
-         ▼
-┌─────────────────┐
-│ PipelineList    │
-│ (return)        │
-└─────────────────┘
-```
-
-### Components
-
-- **App State Machine**: Manages transitions between PipelineList and ExecutingPipeline states
-- **Event Handler**: Non-blocking event processing with state-aware key bindings
-- **UI Rendering**: Modular components for pipeline list, progress bar, and output display
-- **Pipeline Executor**: Async execution with progress events streamed via channels
-
-## Pipeline System
-
-### Pipeline YAML Format
+Roxid uses Azure DevOps pipeline YAML format:
 
 ```yaml
-name: my-pipeline
-description: Optional description
-env:
-  GLOBAL_VAR: value
+trigger:
+  - main
 
-steps:
-  - name: Step name
-    command: echo "Hello World"
-    
-  - name: Multi-line script
-    shell:
-      script: |
-        echo "Line 1"
-        echo "Line 2"
-    env:
-      STEP_VAR: value
-    continue_on_error: true
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  buildConfiguration: Release
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - script: echo "Building $(buildConfiguration)"
+            displayName: Build
+
+          - bash: |
+              echo "Running tests"
+              cargo test
+            displayName: Test
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DeployJob
+        steps:
+          - task: Bash@3
+            inputs:
+              targetType: inline
+              script: echo "Deploying..."
 ```
 
-### Creating a Pipeline
+### Supported Step Types
 
-Create a file ending in `.yaml` or `.yml`:
+- `script` - Default shell (sh on Unix, cmd on Windows)
+- `bash` - Bash scripts
+- `pwsh` - PowerShell Core scripts
+- `powershell` - Windows PowerShell scripts
+- `checkout` - Repository checkout
+- `task` - Azure DevOps marketplace tasks (e.g., `Bash@3`)
+- `template` - Template reference with parameters
+- `download` / `publish` - Artifact operations
+
+### Template Example
 
 ```yaml
-name: my-first-pipeline
-description: My first custom pipeline
+# templates/build-steps.yml
+parameters:
+  - name: configuration
+    type: string
+    default: Debug
+
 steps:
-  - name: Hello World
-    command: echo "Hello from my pipeline!"
-  
-  - name: Show Date
-    command: date
-  
-  - name: List Files
-    command: ls -la
+  - script: echo "Building ${{ parameters.configuration }}"
 ```
 
-### Basic Usage Example
-
-```rust
-use pipeline_rpc::{PipelineHandler, ExecutionEvent};
-use color_eyre::Result;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Create RPC handler
-    let handler = PipelineHandler::new();
-    
-    // Parse pipeline from file
-    let pipeline = handler.parse_from_file("pipeline.yaml")?;
-    
-    // Get working directory
-    let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
-    
-    // Execute pipeline through RPC layer
-    handler.execute_pipeline(pipeline, working_dir, None).await?;
-    
-    Ok(())
-}
-```
-
-### With Progress Reporting
-
-```rust
-use pipeline_rpc::{PipelineHandler, ExecutionEvent};
-
-// Create event channel
-let (tx, mut rx) = PipelineHandler::create_event_channel();
-
-// Create handler and parse pipeline
-let handler = PipelineHandler::new();
-let pipeline = handler.parse_from_file("pipeline.yaml")?;
-let working_dir = std::env::current_dir()?.to_string_lossy().to_string();
-
-// Spawn executor
-let handle = tokio::spawn(async move {
-    handler.execute_pipeline(pipeline, working_dir, Some(tx)).await
-});
-
-// Monitor progress
-while let Some(event) = rx.recv().await {
-    match event {
-        ExecutionEvent::StepStarted { step_name, .. } => {
-            println!("Running: {}", step_name);
-        }
-        ExecutionEvent::StepOutput { output, .. } => {
-            println!("  {}", output);
-        }
-        ExecutionEvent::StepCompleted { result, .. } => {
-            println!("Completed: {:?}", result.status);
-        }
-        _ => {}
-    }
-}
-
-let result = handle.await?;
-```
-
-### Example Pipelines
-
-#### Simple Test Pipeline
 ```yaml
-name: quick-test
-steps:
-  - name: Check version
-    command: rustc --version
-  - name: Run tests
-    command: cargo test
+# azure-pipelines.yml
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - template: templates/build-steps.yml
+            parameters:
+              configuration: Release
 ```
 
-#### Build Pipeline
+## Testing Pipelines
+
+Create a `roxid-test.yml` file:
+
 ```yaml
-name: build-pipeline
-env:
-  RUST_BACKTRACE: "1"
+name: Pipeline Tests
+defaults:
+  working_dir: .
 
-steps:
-  - name: Format check
-    command: cargo fmt --check
-    continue_on_error: true
-    
-  - name: Build
-    command: cargo build --all
-    
-  - name: Test
-    command: cargo test --all
+tests:
+  - name: Build succeeds
+    pipeline: azure-pipelines.yml
+    variables:
+      buildConfiguration: Debug
+    assertions:
+      - pipeline_succeeded
+      - step_succeeded: Build
+
+  - name: Deploy runs after build
+    pipeline: azure-pipelines.yml
+    assertions:
+      - step_ran_before:
+          first: Build
+          second: Deploy
+
+  - name: Output contains expected text
+    pipeline: azure-pipelines.yml
+    assertions:
+      - step_output_contains:
+          step: Build
+          contains: "Building"
 ```
 
-### Pipeline Architecture
+### Available Assertions
 
-The pipeline system consists of:
+| Assertion | Description |
+|-----------|-------------|
+| `pipeline_succeeded` | Pipeline completed successfully |
+| `pipeline_failed` | Pipeline failed |
+| `step_succeeded: <name>` | Named step succeeded |
+| `step_failed: <name>` | Named step failed |
+| `step_skipped: <name>` | Named step was skipped |
+| `job_succeeded: <name>` | Named job succeeded |
+| `stage_succeeded: <name>` | Named stage succeeded |
+| `step_output_equals` | Step output matches expected value |
+| `step_output_contains` | Step output contains expected text |
+| `step_ran_before` | Verify execution ordering |
+| `variable_equals` | Variable has expected value |
+| `variable_contains` | Variable contains expected text |
 
-- **Parser** (`pipeline/parser.rs`) - Parses YAML into Rust structs
-- **Executor** (`pipeline/executor.rs`) - Orchestrates step execution
-- **Runners** (`pipeline/runners/`) - Execute different step types
-  - `shell.rs` - Runs shell commands and scripts
-- **Models** (`pipeline/models.rs`) - Data structures for pipelines, steps, results
+### Running Tests
 
-## TUI Guide
-
-### Interface Overview
-
-#### Pipeline List Screen
+```bash
+roxid test                        # Run all tests
+roxid test --filter "deploy*"     # Filter by name
+roxid test --output junit         # JUnit XML for CI
+roxid test --output tap           # TAP format
 ```
-┌─────────────────────────────────────────────┐
-│  Pipeline Runner                            │
-└─────────────────────────────────────────────┘
-┌─ Available Pipelines ──────────────────────┐
-│  → example-pipeline - A simple example     │
-│    rust-build-pipeline - Build Rust project│
-│    advanced-pipeline - Complex workflow    │
-└─────────────────────────────────────────────┘
-┌─ Help ──────────────────────────────────────┐
-│ ↑/↓: Navigate | Enter: Execute | q: Quit   │
-└─────────────────────────────────────────────┘
-```
-
-#### Pipeline Execution Screen
-```
-┌─────────────────────────────────────────────┐
-│  Executing: example-pipeline                │
-└─────────────────────────────────────────────┘
-┌─ Progress ──────────────────────────────────┐
-│ ████████████░░░░░░░░  Step 3/5             │
-└─────────────────────────────────────────────┘
-┌─ Output ────────────────────────────────────┐
-│ [Step 1/5] Check Rust version              │
-│   rustc 1.70.0 (90c541806 2023-05-31)      │
-│   ✓ Completed in 0.05s                     │
-│                                             │
-│ [Step 2/5] List files                      │
-│   ✓ Completed in 0.02s                     │
-│                                             │
-│ [Step 3/5] Multi-line script               │
-│   Starting multi-line script                │
-└─────────────────────────────────────────────┘
-```
-
-**Features:**
-- Real-time progress bar showing current step
-- Live output streaming as commands execute
-- Color-coded status indicators:
-  - ✓ Green for successful steps
-  - ✗ Red for failed steps
-  - Yellow for step headers
-- Auto-scrolling output (shows most recent lines)
-- Execution time per step
-
-### Execution Flow
-
-1. **Select Pipeline**: Use arrow keys to highlight a pipeline
-2. **Start Execution**: Press Enter to begin execution
-3. **Watch Progress**: View real-time progress and output
-4. **Completion**: Pipeline shows success or failure status
-5. **Return to List**: Press q or Esc to select another pipeline
-
-### Troubleshooting
-
-**No Pipelines Found**
-- Ensure you're in a directory with `.yaml` or `.yml` files
-- Check that files are valid pipeline YAML format
-- Verify files have the required `name` and `steps` fields
-
-**Pipeline Fails to Execute**
-- Check the output panel for error messages
-- Verify commands are available on your system
-- Check file permissions and working directory
-- Review pipeline YAML syntax
-
-**TUI Doesn't Respond**
-- Ensure terminal supports TUI applications
-- Check terminal size is adequate (minimum 80x24)
-- Try resizing terminal window
-
-## Extending the Application
-
-### Adding a New Tab System
-
-```rust
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    #[default]
-    Counter,
-    Items,
-    Settings,
-}
-
-// Add to App struct:
-struct App {
-    counter: i32,
-    items: Vec<String>,
-    current_tab: Tab,
-    should_quit: bool,
-}
-
-// Handle tab switching:
-KeyCode::Char('1') => self.current_tab = Tab::Counter,
-KeyCode::Char('2') => self.current_tab = Tab::Items,
-KeyCode::Char('3') => self.current_tab = Tab::Settings,
-```
-
-### Adding Scrolling to Lists
-
-```rust
-use ratatui::widgets::ListState;
-
-struct App {
-    // ... existing fields
-    list_state: ListState,
-}
-
-// Handle scrolling:
-KeyCode::Up => {
-    let i = self.list_state.selected().unwrap_or(0);
-    if i > 0 {
-        self.list_state.select(Some(i - 1));
-    }
-}
-KeyCode::Down => {
-    let i = self.list_state.selected().unwrap_or(0);
-    if i < self.items.len() - 1 {
-        self.list_state.select(Some(i + 1));
-    }
-}
-
-// Render with state:
-frame.render_stateful_widget(list, main_chunks[1], &mut self.list_state);
-```
-
-### Adding Input Fields
-
-```rust
-struct App {
-    // ... existing fields
-    input: String,
-    input_mode: bool,
-}
-
-// Handle input mode:
-KeyCode::Char('i') if !self.input_mode => {
-    self.input_mode = true;
-}
-KeyCode::Esc if self.input_mode => {
-    self.input_mode = false;
-}
-KeyCode::Char(c) if self.input_mode => {
-    self.input.push(c);
-}
-KeyCode::Backspace if self.input_mode => {
-    self.input.pop();
-}
-KeyCode::Enter if self.input_mode => {
-    self.items.push(self.input.clone());
-    self.input.clear();
-    self.input_mode = false;
-}
-```
-
-### Adding Mouse Support
-
-```rust
-use crossterm::event::{MouseEvent, MouseEventKind};
-
-// In handle_events:
-Event::Mouse(mouse_event) => self.handle_mouse_event(mouse_event),
-
-// Handler:
-fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
-    match mouse_event.kind {
-        MouseEventKind::Down(_) => {
-            // Handle click at position (mouse_event.column, mouse_event.row)
-        }
-        MouseEventKind::ScrollUp => {
-            // Handle scroll up
-        }
-        MouseEventKind::ScrollDown => {
-            // Handle scroll down
-        }
-        _ => {}
-    }
-}
-```
-
-### Adding Async Operations
-
-```rust
-// Add to Cargo.toml:
-// tokio = { version = "1", features = ["full"] }
-
-use tokio::sync::mpsc;
-use std::time::Duration;
-
-enum AppEvent {
-    Input(Event),
-    DataUpdate(String),
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let (tx, mut rx) = mpsc::channel(100);
-    
-    // Spawn background task
-    let tx_clone = tx.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            let _ = tx_clone.send(AppEvent::DataUpdate("Updated".to_string())).await;
-        }
-    });
-    
-    // Main event loop
-    loop {
-        if event::poll(Duration::from_millis(100))? {
-            tx.send(AppEvent::Input(event::read()?)).await?;
-        }
-        
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                AppEvent::Input(e) => { /* handle input */ }
-                AppEvent::DataUpdate(data) => { /* update state */ }
-            }
-        }
-    }
-}
-```
-
-### Custom Pipeline Steps
-
-To extend the pipeline system:
-
-1. **Add new pipeline steps**: Update pipeline YAML files with new commands or shell scripts
-2. **Custom step runners**: Implement new runners in `pipeline-service/src/pipeline/runners/`
-3. **RPC handlers**: Add new RPC handlers in `pipeline-rpc/src/handlers/` to expose new functionality
-4. **Update RPC API**: Export new handlers and types in `pipeline-rpc/src/lib.rs`
-5. **Client updates**: Use new RPC handlers in CLI/TUI applications
-6. **UI screens**: Create new app states and corresponding UI components in TUI
-7. **Pipeline filters**: Add filtering/searching capabilities to the pipeline list
-
-**Remember**: All client functionality must go through the RPC layer. Never import `pipeline-service` directly in CLI or TUI.
-
-### Best Practices
-
-1. **Keep render functions pure** - Don't modify state during rendering
-2. **Handle errors gracefully** - Use Result types and proper error handling
-3. **Test rendering logic** - Ratatui supports testing with Buffer
-4. **Profile performance** - TUI apps should render at 60fps
-5. **Use proper terminal cleanup** - Always restore terminal state on exit
 
 ## Project Structure
 
-### Building and Running
-
-```bash
-# Build entire workspace
-cargo build
-
-# Build specific package
-cargo build -p roxid-tui
-cargo build -p pipeline-service
-cargo build -p roxid
-
-# Start the gRPC service
-cargo run --bin pipeline-service
-
-# Run the TUI application (service must be running)
-cargo run --bin roxid
-
-# Run the CLI application (service must be running)
-cargo run --bin roxid run example-pipeline.yaml
-
-# Run tests for all packages
-cargo test
-
-# Run tests for specific package
-cargo test -p pipeline-service
-
-# Check code without building
-cargo check
+```
+roxid/
+├── Cargo.toml                    # Workspace manifest
+├── pipeline-service/src/
+│   ├── lib.rs                    # Public API re-exports
+│   ├── error.rs                  # ServiceError, ServiceResult
+│   ├── parser/
+│   │   ├── mod.rs
+│   │   ├── azure.rs              # Azure DevOps YAML parser (AzureParser)
+│   │   ├── error.rs              # ParseError, ValidationError (rich errors)
+│   │   ├── models.rs             # Pipeline, Stage, Job, Step, Value, etc.
+│   │   └── template.rs           # Template resolution (TemplateEngine)
+│   ├── expression/
+│   │   ├── mod.rs
+│   │   ├── evaluator.rs          # ExpressionEngine, ExpressionContext
+│   │   ├── functions.rs          # Built-in functions
+│   │   ├── lexer.rs              # Tokenizer
+│   │   └── parser.rs             # Expression AST parser
+│   ├── execution/
+│   │   ├── mod.rs
+│   │   ├── executor.rs           # PipelineExecutor, DAG-based scheduling
+│   │   ├── graph.rs              # ExecutionGraph, DAG builder
+│   │   ├── matrix.rs             # MatrixExpander
+│   │   ├── context.rs            # RuntimeContext
+│   │   └── events.rs             # ExecutionEvent, channel types
+│   ├── runners/
+│   │   ├── mod.rs
+│   │   ├── shell.rs              # ShellRunner (sh/bash/pwsh)
+│   │   ├── task.rs               # TaskRunner (Azure DevOps tasks)
+│   │   └── container.rs          # ContainerRunner (Docker)
+│   ├── tasks/
+│   │   ├── mod.rs
+│   │   ├── cache.rs              # TaskCache management
+│   │   └── manifest.rs           # task.json parser
+│   ├── testing/
+│   │   ├── mod.rs
+│   │   ├── runner.rs             # TestRunner
+│   │   ├── assertions.rs         # Assertion logic
+│   │   ├── parser.rs             # Test file parser
+│   │   └── reporter.rs           # JUnit/TAP/terminal output
+│   └── workflow/
+│       ├── mod.rs
+│       ├── models.rs             # GitHub Actions Workflow types
+│       └── parser.rs             # WorkflowParser
+├── roxid-tui/src/
+│   ├── lib.rs, main.rs           # TUI entry points
+│   ├── app.rs                    # Application state machine (6 states)
+│   ├── events.rs                 # Keyboard event handling
+│   ├── ui.rs                     # UI module root
+│   └── ui/                       # UI components
+│       ├── layout.rs             # Layout system
+│       ├── components.rs         # Header, footer, status helpers
+│       ├── pipeline_list.rs      # Pipeline browser
+│       ├── pipeline_tree.rs      # Expandable tree view
+│       ├── execution.rs          # Real-time execution display
+│       ├── log_viewer.rs         # Scrollable log viewer
+│       └── test_results.rs       # Test results panel
+└── roxid-cli/src/
+    ├── main.rs                   # CLI entry point (clap)
+    ├── output.rs                 # Terminal formatting helpers
+    └── commands/                 # Subcommands
+        ├── mod.rs
+        ├── run.rs                # roxid run
+        ├── test.rs               # roxid test
+        ├── validate.rs           # roxid validate
+        └── task.rs               # roxid task
 ```
 
-### Benefits of This Architecture
+## Key Dependencies
 
-1. **Service Independence**: gRPC service can run anywhere, local or remote
-2. **Language Agnostic**: Clients can be written in any language with gRPC support
-3. **Scalability**: Service handles multiple concurrent clients
-4. **Real-time Updates**: Streaming gRPC provides live execution feedback
-5. **Clean Separation**: Service and clients are completely decoupled
-6. **Testability**: Each component can be tested independently
-7. **Maintainability**: Clear boundaries and standard protocols
-8. **Extensibility**: Easy to add new client types (web, mobile, etc.)
-9. **Deployability**: Service can be containerized and deployed independently
+| Crate | Used by | Purpose |
+|-------|---------|---------|
+| tokio 1.0 | all | Async runtime (full features) |
+| serde + serde_yaml | pipeline-service, roxid-tui | YAML serialization |
+| thiserror | pipeline-service | Error derive macros |
+| async-trait | pipeline-service | Async trait support |
+| clap 4 | roxid-cli | CLI argument parsing |
+| ratatui 0.29 | roxid-tui | Terminal UI framework |
+| crossterm 0.29 | roxid-tui | Terminal backend |
+| color-eyre | roxid-cli, roxid-tui | Error reporting |
+| dirs | pipeline-service | Platform directory paths |
+| which | pipeline-service | Executable lookup |
+| tempfile | pipeline-service (dev) | Temp files in tests |
 
 ## Resources
 
+- [Azure DevOps YAML Schema](https://docs.microsoft.com/en-us/azure/devops/pipelines/yaml-schema)
+- [Azure DevOps Expressions](https://docs.microsoft.com/en-us/azure/devops/pipelines/process/expressions)
+- [Azure DevOps Templates](https://docs.microsoft.com/en-us/azure/devops/pipelines/process/templates)
 - [Ratatui Documentation](https://docs.rs/ratatui)
 - [Ratatui Website](https://ratatui.rs/)
-- [Tonic gRPC Documentation](https://docs.rs/tonic)
-- [Protocol Buffers](https://protobuf.dev/)
 - [Crossterm Documentation](https://docs.rs/crossterm)
 
 ## License
 
-This skeleton application is provided as-is for educational and development purposes.
+Licensed under either of Apache License 2.0 or MIT license at your option.

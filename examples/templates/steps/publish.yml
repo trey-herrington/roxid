@@ -1,0 +1,28 @@
+# Step Template: Publish Steps
+# Reusable artifact publishing.
+
+parameters:
+  - name: artifactName
+    type: string
+  - name: binaryPath
+    type: string
+    default: target/release/roxid
+  - name: includeChecksum
+    type: boolean
+    default: true
+
+steps:
+  - script: |
+      mkdir -p staging
+      cp ${{ parameters.binaryPath }} staging/
+    displayName: Stage ${{ parameters.artifactName }}
+
+  - ${{ if eq(parameters.includeChecksum, true) }}:
+    - script: |
+        cd staging
+        sha256sum * > checksums.sha256
+      displayName: Generate checksums
+
+  - publish: staging
+    artifact: ${{ parameters.artifactName }}
+    displayName: Publish ${{ parameters.artifactName }}

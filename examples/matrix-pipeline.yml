@@ -1,0 +1,95 @@
+# Matrix Strategy Pipeline
+# Demonstrates matrix builds across multiple OS targets and Rust toolchains,
+# parallel job limits, and strategy-driven variable expansion.
+
+trigger:
+  - main
+
+variables:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---- Cross-platform matrix build ----
+  - job: Build
+    displayName: "Build on $(osName) with Rust $(rustToolchain)"
+    strategy:
+      matrix:
+        linux_stable:
+          osName: Linux
+          vmImage: ubuntu-latest
+          rustToolchain: stable
+          targetTriple: x86_64-unknown-linux-gnu
+        linux_nightly:
+          osName: Linux
+          vmImage: ubuntu-latest
+          rustToolchain: nightly
+          targetTriple: x86_64-unknown-linux-gnu
+        macos_stable:
+          osName: macOS
+          vmImage: macos-latest
+          rustToolchain: stable
+          targetTriple: x86_64-apple-darwin
+        windows_stable:
+          osName: Windows
+          vmImage: windows-latest
+          rustToolchain: stable
+          targetTriple: x86_64-pc-windows-msvc
+      maxParallel: 3
+    pool:
+      vmImage: $(vmImage)
+    continueOnError: $[eq(variables.rustToolchain, 'nightly')]
+    steps:
+      - checkout: self
+
+      - script: |
+          rustup default $(rustToolchain)
+          rustup target add $(targetTriple)
+        displayName: Configure Rust $(rustToolchain)
+
+      - script: cargo build --target $(targetTriple)
+        displayName: Build for $(targetTriple)
+        timeoutInMinutes: 20
+
+      - script: cargo test --target $(targetTriple)
+        displayName: Test on $(osName)
+        env:
+          RUST_BACKTRACE: "1"
+
+  # ---- Feature combination matrix ----
+  - job: FeatureMatrix
+    displayName: "Test feature: $(featureSet)"
+    dependsOn: []
+    strategy:
+      matrix:
+        default_features:
+          featureSet: default
+          cargoFlags: ""
+        no_default_features:
+          featureSet: minimal
+          cargoFlags: "--no-default-features"
+        all_features:
+          featureSet: full
+          cargoFlags: "--all-features"
+      maxParallel: 3
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - script: cargo test -p pipeline-service $(cargoFlags)
+        displayName: Test pipeline-service ($(featureSet))
+
+      - script: cargo test -p roxid-tui $(cargoFlags)
+        displayName: Test roxid-tui ($(featureSet))
+
+  # ---- Parallel job count strategy ----
+  - job: IntegrationTests
+    displayName: Integration test batch
+    dependsOn: Build
+    strategy:
+      parallel: 4
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - script: |
+          echo "Running integration test batch $(System.JobPositionInPhase) of $(System.TotalJobsInPhase)"
+          cargo test --test integration -- --partition count:$(System.TotalJobsInPhase):$(System.JobPositionInPhase)
+        displayName: Run integration test partition

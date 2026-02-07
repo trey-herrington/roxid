@@ -1,0 +1,145 @@
+# Multi-Stage Pipeline
+# Demonstrates stages with dependencies, conditions, stage-level variables,
+# and job-to-job output variable passing.
+
+trigger:
+  branches:
+    include:
+      - main
+      - "release/*"
+  tags:
+    include:
+      - "v*"
+
+variables:
+  - name: isRelease
+    value: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/v')]
+  - name: buildConfiguration
+    value: Release
+
+stages:
+  # ---- Stage 1: Build ----
+  - stage: Build
+    displayName: Build & Test
+    jobs:
+      - job: BuildJob
+        displayName: Compile Roxid
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          cargoFlags: "--workspace --release"
+        steps:
+          - checkout: self
+            fetchDepth: 0
+
+          - script: cargo build $(cargoFlags)
+            displayName: Build workspace
+
+          - script: cargo test $(cargoFlags)
+            displayName: Run tests
+            env:
+              RUST_BACKTRACE: "1"
+
+          - script: |
+              VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "roxid-cli") | .version')
+              echo "##vso[task.setvariable variable=appVersion;isoutput=true]$VERSION"
+            name: getVersion
+            displayName: Extract version
+
+      - job: LintJob
+        displayName: Lint & Format
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo fmt --check
+            displayName: Check formatting
+
+          - script: cargo clippy -- -D warnings
+            displayName: Run Clippy
+
+  # ---- Stage 2: Package ----
+  - stage: Package
+    displayName: Package Artifacts
+    dependsOn: Build
+    variables:
+      appVersion: $[stageDependencies.Build.BuildJob.outputs['getVersion.appVersion']]
+    jobs:
+      - job: PackageLinux
+        displayName: Package Linux binary
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo build --release --bin roxid
+            displayName: Build release binary
+
+          - script: |
+              mkdir -p artifact
+              cp target/release/roxid artifact/roxid-linux-amd64
+              echo "Packaged roxid v$(appVersion) for Linux"
+            displayName: Prepare artifact
+
+          - publish: artifact
+            artifact: linux-binary
+            displayName: Publish Linux binary
+
+      - job: PackageMac
+        displayName: Package macOS binary
+        pool:
+          vmImage: macos-latest
+        steps:
+          - script: cargo build --release --bin roxid
+            displayName: Build release binary
+
+          - script: |
+              mkdir -p artifact
+              cp target/release/roxid artifact/roxid-darwin-amd64
+            displayName: Prepare artifact
+
+          - publish: artifact
+            artifact: macos-binary
+            displayName: Publish macOS binary
+
+  # ---- Stage 3: Publish ----
+  - stage: Publish
+    displayName: Publish Release
+    dependsOn:
+      - Build
+      - Package
+    condition: and(succeeded(), eq(variables.isRelease, 'true'))
+    jobs:
+      - job: PublishCrate
+        displayName: Publish to crates.io
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - download: current
+            artifact: linux-binary
+            displayName: Download Linux artifact
+
+          - script: |
+              echo "Publishing Roxid to crates.io..."
+              cargo publish -p pipeline-service --dry-run
+              cargo publish -p roxid-tui --dry-run
+              cargo publish -p roxid-cli --dry-run
+            displayName: Publish crates (dry-run)
+            env:
+              CARGO_REGISTRY_TOKEN: $(cratesIoToken)
+
+  # ---- Stage 4: Notify ----
+  - stage: Notify
+    displayName: Send Notifications
+    dependsOn: Publish
+    condition: succeededOrFailed()
+    jobs:
+      - job: NotifyTeam
+        displayName: Notify team
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              if [ "$(Agent.JobStatus)" == "Succeeded" ]; then
+                echo "Release succeeded!"
+              else
+                echo "Release had issues - check pipeline logs"
+              fi
+            displayName: Send notification

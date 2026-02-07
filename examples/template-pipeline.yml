@@ -1,0 +1,103 @@
+# Template Pipeline
+# Demonstrates using step/job/stage/variable templates, extends,
+# template parameters, and each-loop generation from templates.
+
+trigger:
+  - main
+
+parameters:
+  - name: buildConfig
+    displayName: Build configuration
+    type: string
+    default: Release
+    values:
+      - Debug
+      - Release
+
+  - name: environments
+    displayName: Deployment environments
+    type: object
+    default:
+      - dev
+      - staging
+
+  - name: runIntegrationTests
+    displayName: Run integration tests
+    type: boolean
+    default: true
+
+  - name: targetPlatforms
+    displayName: Target platforms
+    type: object
+    default:
+      - name: linux
+        vmImage: ubuntu-latest
+      - name: macos
+        vmImage: macos-latest
+
+variables:
+  - template: templates/variables/common.yml
+
+stages:
+  # ---- Build stage using job templates ----
+  - stage: Build
+    displayName: Build & Test
+    jobs:
+      # Use the build job template
+      - template: templates/jobs/build-job.yml
+        parameters:
+          buildConfig: ${{ parameters.buildConfig }}
+          runTests: true
+          publishArtifacts: true
+          artifactName: roxid-build
+
+      # Use the test job template for unit tests
+      - template: templates/jobs/test-job.yml
+        parameters:
+          testScope: unit
+          coverageEnabled: true
+
+      # Conditionally include integration test job
+      - ${{ if eq(parameters.runIntegrationTests, true) }}:
+        - template: templates/jobs/test-job.yml
+          parameters:
+            testScope: integration
+
+      # Lint job using step template
+      - job: Lint
+        displayName: Lint checks
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - template: templates/steps/lint.yml
+            parameters:
+              failOnWarnings: true
+              checkFormat: true
+
+  # ---- Cross-platform build using each loop ----
+  - stage: CrossPlatform
+    displayName: Cross-Platform Builds
+    dependsOn: Build
+    jobs:
+      - ${{ each platform in parameters.targetPlatforms }}:
+        - job: Build_${{ platform.name }}
+          displayName: "Build on ${{ platform.name }}"
+          pool:
+            vmImage: ${{ platform.vmImage }}
+          steps:
+            - template: templates/steps/build.yml
+              parameters:
+                buildConfig: ${{ parameters.buildConfig }}
+                runTests: false
+
+            - template: templates/steps/publish.yml
+              parameters:
+                artifactName: roxid-${{ platform.name }}
+
+  # ---- Deploy stages generated from parameter list ----
+  - ${{ each env in parameters.environments }}:
+    - template: templates/stages/deploy-stage.yml
+      parameters:
+        environment: ${{ env }}
+        dependsOn: CrossPlatform
+        imageTag: $(Build.BuildId)
