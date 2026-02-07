@@ -1,0 +1,133 @@
+# Roxid Test Suite
+# Test definitions for validating the example pipelines using Roxid's
+# built-in testing framework.
+
+tests:
+  # ==== Simple Pipeline Tests ====
+  - name: "Simple pipeline builds successfully"
+    pipeline: simple-pipeline.yml
+    variables:
+      rustVersion: stable
+    assertions:
+      - step_succeeded: "Build workspace"
+      - step_succeeded: "Run tests"
+
+  - name: "Simple pipeline runs Clippy"
+    pipeline: simple-pipeline.yml
+    assertions:
+      - step_succeeded: "Run Clippy lints"
+
+  - name: "Simple pipeline checkout is first step"
+    pipeline: simple-pipeline.yml
+    assertions:
+      - step_ran_before:
+          step: "Checkout repository"
+          before: "Install Rust toolchain"
+
+  # ==== Multi-Stage Pipeline Tests ====
+  - name: "Multi-stage pipeline builds before packaging"
+    pipeline: multi-stage-pipeline.yml
+    variables:
+      buildConfiguration: Release
+    assertions:
+      - step_succeeded: "Compile Roxid"
+      - step_ran_before:
+          step: "Build workspace"
+          before: "Prepare artifact"
+
+  - name: "Multi-stage lint job runs independently"
+    pipeline: multi-stage-pipeline.yml
+    assertions:
+      - step_succeeded: "Check formatting"
+      - step_succeeded: "Run Clippy"
+
+  - name: "Publish stage skipped when not a release"
+    pipeline: multi-stage-pipeline.yml
+    variables:
+      Build.SourceBranch: refs/heads/develop
+    assertions:
+      - step_skipped: "Publish crates (dry-run)"
+
+  # ==== Matrix Pipeline Tests ====
+  - name: "Matrix pipeline generates platform jobs"
+    pipeline: matrix-pipeline.yml
+    assertions:
+      - step_succeeded: "Build for x86_64-unknown-linux-gnu"
+
+  - name: "Feature matrix tests all configurations"
+    pipeline: matrix-pipeline.yml
+    assertions:
+      - step_succeeded: "Test pipeline-service (default)"
+
+  # ==== Container Pipeline Tests ====
+  - name: "Container build runs in Rust container"
+    pipeline: container-pipeline.yml
+    assertions:
+      - step_succeeded: "Show Rust version"
+      - step_succeeded: "Build workspace"
+
+  - name: "Integration tests wait for services"
+    pipeline: container-pipeline.yml
+    assertions:
+      - step_ran_before:
+          step: "Wait for database"
+          before: "Run integration tests"
+
+  # ==== Conditional Pipeline Tests ====
+  - name: "Doc tests only run on main branch"
+    pipeline: conditional-pipeline.yml
+    variables:
+      Build.SourceBranch: refs/heads/develop
+    assertions:
+      - step_skipped: "Run doc tests"
+
+  - name: "Doc tests run on main branch"
+    pipeline: conditional-pipeline.yml
+    variables:
+      Build.SourceBranch: refs/heads/main
+    assertions:
+      - step_succeeded: "Run doc tests"
+
+  - name: "Integration tests skipped on feature branches"
+    pipeline: conditional-pipeline.yml
+    variables:
+      Build.SourceBranch: refs/heads/feature/new-feature
+    assertions:
+      - step_skipped: "Run integration tests"
+
+  - name: "Quality gate runs on main"
+    pipeline: conditional-pipeline.yml
+    variables:
+      Build.SourceBranch: refs/heads/main
+    assertions:
+      - step_succeeded: "Format check"
+      - step_succeeded: "Clippy (strict)"
+
+  # ==== Full Pipeline Tests ====
+  - name: "Full pipeline CI stage completes"
+    pipeline: azure-pipelines.yml
+    variables:
+      buildConfiguration: Release
+    assertions:
+      - step_succeeded: "Check formatting"
+      - step_succeeded: "Run Clippy (strict)"
+      - step_succeeded: "Run unit tests"
+
+  - name: "Full pipeline extracts version"
+    pipeline: azure-pipelines.yml
+    assertions:
+      - step_succeeded: "Extract version metadata"
+      - step_output_contains:
+          step: "Extract version metadata"
+          pattern: "Roxid version:"
+
+  # ==== Deployment Pipeline Tests ====
+  - name: "Deployment pipeline builds image"
+    pipeline: deployment-pipeline.yml
+    assertions:
+      - step_succeeded: "Build release binary"
+
+  - name: "Dev deployment runs smoke test"
+    pipeline: deployment-pipeline.yml
+    assertions:
+      - step_succeeded: "Smoke test dev"

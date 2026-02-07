@@ -7,11 +7,11 @@ use crate::execution::graph::{ExecutionGraph, GraphError, JobNode, StageNode};
 use crate::execution::matrix::MatrixExpander;
 use crate::parser::models::{
     ExecutionContext, Job, JobResult, JobStatus, Pipeline, StageResult, StageStatus, Step,
-    StepResult, StepStatus, StepAction,
+    StepAction, StepResult, StepStatus,
 };
+use crate::runners::container::ContainerRunner;
 use crate::runners::shell::ShellRunner;
 use crate::runners::task::TaskRunner;
-use crate::runners::container::ContainerRunner;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -71,6 +71,7 @@ pub struct PipelineExecutor {
     /// Progress event sender
     event_tx: Option<ProgressSender>,
     /// Shell runner for script steps
+    #[allow(dead_code)]
     shell_runner: ShellRunner,
     /// Task runner for Azure DevOps tasks
     task_runner: Option<TaskRunner>,
@@ -110,12 +111,12 @@ impl PipelineExecutor {
         if let Some(cache_dir) = &config.task_cache_dir {
             self.task_runner = Some(TaskRunner::new(cache_dir.clone()));
         }
-        
+
         // Set up container runner if enabled
         if config.enable_containers {
             self.container_runner = Some(ContainerRunner::new());
         }
-        
+
         self.config = config;
         self
     }
@@ -125,13 +126,13 @@ impl PipelineExecutor {
         self.event_tx = Some(tx);
         self
     }
-    
+
     /// Enable task execution with the specified cache directory
     pub fn with_task_runner(mut self, cache_dir: PathBuf) -> Self {
         self.task_runner = Some(TaskRunner::new(cache_dir));
         self
     }
-    
+
     /// Enable container execution
     pub fn with_container_runner(mut self) -> Self {
         self.container_runner = Some(ContainerRunner::new());
@@ -156,9 +157,7 @@ impl PipelineExecutor {
 
         for stage_level in parallel_stages {
             // Execute stages at this level (potentially in parallel)
-            let level_results = self
-                .execute_stage_level(&stage_level, &mut runtime)
-                .await;
+            let level_results = self.execute_stage_level(&stage_level, &mut runtime).await;
 
             for result in level_results {
                 let failed = result.status == StageStatus::Failed;
@@ -475,13 +474,7 @@ impl PipelineExecutor {
             }
 
             let instance_result = self
-                .execute_job_instance(
-                    job,
-                    stage_name,
-                    &job_name,
-                    Some(&instance.name),
-                    runtime,
-                )
+                .execute_job_instance(job, stage_name, &job_name, Some(&instance.name), runtime)
                 .await;
 
             all_steps.extend(instance_result.steps);
@@ -694,7 +687,14 @@ impl PipelineExecutor {
 
         // Execute the step based on its action type
         let result = self
-            .execute_step_action(&step.action, step, step_index, stage_name, job_name, runtime)
+            .execute_step_action(
+                &step.action,
+                step,
+                step_index,
+                stage_name,
+                job_name,
+                runtime,
+            )
             .await;
 
         // Send step completed event
@@ -782,17 +782,15 @@ impl PipelineExecutor {
                 if let Some(task_runner) = &self.task_runner {
                     let working_dir = std::path::PathBuf::from(&runtime.base.working_dir);
                     let env = runtime.env_as_strings();
-                    
-                    match task_runner.execute_task(
-                        &task_step.task,
-                        &task_step.inputs,
-                        &env,
-                        &working_dir,
-                    ).await {
+
+                    match task_runner
+                        .execute_task(&task_step.task, &task_step.inputs, &env, &working_dir)
+                        .await
+                    {
                         Ok(mut result) => {
                             result.step_name = step_name;
                             result.display_name = step.display_name.clone();
-                            
+
                             // Send output event
                             if !result.output.is_empty() {
                                 self.event_tx.send_event(ExecutionEvent::step_output(
@@ -804,7 +802,7 @@ impl PipelineExecutor {
                                     false,
                                 ));
                             }
-                            
+
                             result
                         }
                         Err(e) => StepResult {
@@ -816,7 +814,7 @@ impl PipelineExecutor {
                             duration: start.elapsed(),
                             exit_code: None,
                             outputs: HashMap::new(),
-                        }
+                        },
                     }
                 } else {
                     // Task runner not configured - log a warning
@@ -833,7 +831,10 @@ impl PipelineExecutor {
                         step_name,
                         display_name: step.display_name.clone(),
                         status: StepStatus::Skipped,
-                        output: format!("Task: {} (skipped - task runner not configured)", task_step.task),
+                        output: format!(
+                            "Task: {} (skipped - task runner not configured)",
+                            task_step.task
+                        ),
                         error: None,
                         duration: start.elapsed(),
                         exit_code: None,
@@ -897,6 +898,7 @@ impl PipelineExecutor {
     }
 
     /// Execute a script step
+    #[allow(clippy::too_many_arguments)]
     async fn execute_script(
         &self,
         script: &str,
@@ -941,6 +943,7 @@ impl PipelineExecutor {
     }
 
     /// Execute a bash step
+    #[allow(clippy::too_many_arguments)]
     async fn execute_bash(
         &self,
         script: &str,
@@ -984,6 +987,7 @@ impl PipelineExecutor {
     }
 
     /// Execute a pwsh (PowerShell Core) step
+    #[allow(clippy::too_many_arguments)]
     async fn execute_pwsh(
         &self,
         script: &str,
@@ -1027,6 +1031,7 @@ impl PipelineExecutor {
     }
 
     /// Execute a PowerShell (Windows) step
+    #[allow(clippy::too_many_arguments)]
     async fn execute_powershell(
         &self,
         script: &str,
@@ -1077,6 +1082,7 @@ impl PipelineExecutor {
     }
 
     /// Run a shell command
+    #[allow(clippy::too_many_arguments)]
     async fn run_shell_command(
         &self,
         script: &str,
@@ -1101,7 +1107,9 @@ impl PipelineExecutor {
         let mut env = runtime.env_as_strings();
         for (k, v) in &step.env {
             // Substitute variables in env values
-            let value = runtime.substitute_variables(v).unwrap_or_else(|_| v.clone());
+            let value = runtime
+                .substitute_variables(v)
+                .unwrap_or_else(|_| v.clone());
             env.insert(k.clone(), value);
         }
 
@@ -1162,9 +1170,7 @@ impl PipelineExecutor {
 
         // Determine status
         let exit_code = output.status.code();
-        let status = if !output.status.success() {
-            StepStatus::Failed
-        } else if fail_on_stderr && !stderr.is_empty() {
+        let status = if !output.status.success() || (fail_on_stderr && !stderr.is_empty()) {
             StepStatus::Failed
         } else {
             StepStatus::Succeeded

@@ -1,0 +1,27 @@
+# Step Template: Lint Steps
+# Reusable linting and formatting checks.
+
+parameters:
+  - name: failOnWarnings
+    type: boolean
+    default: true
+  - name: checkFormat
+    type: boolean
+    default: true
+
+steps:
+  - ${{ if eq(parameters.checkFormat, true) }}:
+    - script: cargo fmt --check
+      displayName: Check formatting
+
+  - script: |
+      ${{ if eq(parameters.failOnWarnings, true) }}:
+        cargo clippy --workspace -- -D warnings
+      ${{ else }}:
+        cargo clippy --workspace
+    displayName: Run Clippy
+    continueOnError: ${{ not(parameters.failOnWarnings) }}
+
+  - script: |
+      echo "Lint checks complete"
+    displayName: Lint summary

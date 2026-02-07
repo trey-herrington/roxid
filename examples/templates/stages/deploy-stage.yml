@@ -1,0 +1,59 @@
+# Stage Template: Deploy Stage
+# Reusable deployment stage with environment selection and strategy.
+
+parameters:
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: string
+    default: Build
+  - name: vmImage
+    type: string
+    default: ubuntu-latest
+  - name: registryUrl
+    type: string
+    default: roxid.azurecr.io
+  - name: imageName
+    type: string
+    default: roxid-app
+  - name: imageTag
+    type: string
+
+stages:
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: "Deploy to ${{ parameters.environment }}"
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: succeeded()
+    jobs:
+      - deployment: Deploy
+        displayName: "Deploy ${{ parameters.imageName }} to ${{ parameters.environment }}"
+        environment:
+          name: roxid-${{ parameters.environment }}
+        pool:
+          vmImage: ${{ parameters.vmImage }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    echo "Deploying ${{ parameters.imageName }}:${{ parameters.imageTag }}"
+                    echo "Target: ${{ parameters.environment }}"
+                    echo "Registry: ${{ parameters.registryUrl }}"
+                  displayName: Deploy to ${{ parameters.environment }}
+
+            postRouteTraffic:
+              steps:
+                - script: |
+                    echo "Running smoke tests for ${{ parameters.environment }}"
+                    curl -sf "http://roxid-${{ parameters.environment }}.internal/health" || exit 1
+                  displayName: Smoke test ${{ parameters.environment }}
+
+            onFailure:
+              steps:
+                - script: echo "Deployment to ${{ parameters.environment }} failed!"
+                  displayName: Report failure
+
+            onSuccess:
+              steps:
+                - script: echo "Deployment to ${{ parameters.environment }} succeeded!"
+                  displayName: Report success

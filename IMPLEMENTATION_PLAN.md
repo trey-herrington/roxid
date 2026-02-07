@@ -2,11 +2,13 @@
 
 This document outlines the plan to extend Roxid to support GitHub Actions workflow syntax.
 
+**Status:** Future phase (post-MVP). Basic workflow models and parser already exist in `pipeline-service/src/workflow/`.
+
 ## Phase 1: Core Schema (P0)
 
 ### 1.1 Extend Models for GitHub Actions Structure
 
-Update `pipeline-service/src/pipeline/models.rs` to support:
+Extend the existing `pipeline-service/src/workflow/models.rs` to support:
 
 ```rust
 // Workflow (top-level)
@@ -53,17 +55,7 @@ pub struct Step {
 
 ### 1.2 Expression System
 
-Create `pipeline-service/src/expression/` module:
-
-```
-expression/
-├── mod.rs
-├── lexer.rs      # Tokenize ${{ ... }} expressions
-├── parser.rs     # Parse expression AST
-├── evaluator.rs  # Evaluate expressions against context
-├── functions.rs  # Built-in functions (contains, startsWith, etc.)
-└── context.rs    # Context providers (github, env, job, steps, etc.)
-```
+Extend the existing `pipeline-service/src/expression/` module to support GitHub Actions expression syntax:
 
 **Expression Features:**
 - Literals: strings, numbers, booleans, null
@@ -72,9 +64,11 @@ expression/
 - Functions: `contains()`, `startsWith()`, `endsWith()`, `format()`, `join()`, `toJSON()`, `fromJSON()`, `hashFiles()`
 - Status functions: `success()`, `failure()`, `always()`, `cancelled()`
 
+Note: The expression engine already supports most of these operators and functions for Azure DevOps. GitHub Actions uses the same `${{ }}` syntax. The main work is mapping GitHub Actions-specific context names and adding a few GitHub-specific functions.
+
 ### 1.3 Context System
 
-Implement context providers:
+Implement GitHub Actions context providers:
 
 ```rust
 pub struct WorkflowContext {
@@ -93,17 +87,15 @@ pub struct WorkflowContext {
 
 ### 2.1 Job DAG Executor
 
-- Parse `needs` dependencies to build execution graph
-- Topological sort for execution order
-- Parallel execution of independent jobs
+The existing DAG builder (`pipeline-service/src/execution/graph.rs`) can be reused. Extend to:
+- Parse `needs` dependencies (maps to Azure DevOps `dependsOn`)
 - Job output passing via `needs.job_id.outputs.output_name`
 
 ### 2.2 Matrix Expansion
 
-- Expand `strategy.matrix` into job instances
-- Support `include` and `exclude`
-- Pass matrix values to context
-- Handle `fail-fast` and `max-parallel`
+The existing matrix expander (`pipeline-service/src/execution/matrix.rs`) can be extended to support:
+- `include` and `exclude` directives
+- `fail-fast` and `max-parallel` options
 
 ### 2.3 Step Execution Enhancements
 
@@ -124,17 +116,15 @@ pub struct WorkflowContext {
 
 ### 3.2 Action Runners
 
-- **JavaScript actions**: Run with Node.js
+- **JavaScript actions**: Run with Node.js (reuse task runner's Node.js execution support)
 - **Composite actions**: Expand steps inline
-- **Docker actions**: Run in container
+- **Docker actions**: Run in container (reuse container runner)
 
 ## Phase 4: Advanced Features (P3)
 
 ### 4.1 Service Containers
 
-- Start Docker services before job
-- Network configuration
-- Health checks
+The existing container runner (`pipeline-service/src/runners/container.rs`) already supports service containers. Extend for GitHub Actions service syntax.
 
 ### 4.2 Artifacts & Caching
 
@@ -156,44 +146,54 @@ pub struct WorkflowContext {
 pipeline-service/src/
 ├── lib.rs
 ├── error.rs
-├── grpc.rs
-├── workflow/                    # NEW: GitHub Actions workflow support
+├── parser/
 │   ├── mod.rs
-│   ├── models.rs               # Workflow, Job, Step structs
-│   ├── parser.rs               # YAML parsing with GitHub Actions schema
-│   ├── validator.rs            # Schema validation
-│   └── trigger.rs              # Trigger parsing and simulation
-├── expression/                  # NEW: Expression evaluation
+│   ├── azure.rs              # Azure DevOps YAML parser
+│   ├── error.rs              # ParseError, ValidationError
+│   ├── models.rs             # Azure DevOps pipeline models
+│   └── template.rs           # Template resolution engine
+├── expression/
 │   ├── mod.rs
-│   ├── lexer.rs
-│   ├── parser.rs
-│   ├── evaluator.rs
-│   ├── functions.rs
-│   └── context.rs
-├── executor/                    # NEW: Enhanced execution engine
+│   ├── lexer.rs              # Tokenizer (shared)
+│   ├── parser.rs             # Expression AST parser (shared)
+│   ├── evaluator.rs          # Evaluator (shared, extended for GH Actions)
+│   └── functions.rs          # Built-in functions (shared + GH-specific)
+├── execution/
 │   ├── mod.rs
-│   ├── job_executor.rs         # Job-level execution with DAG
-│   ├── step_executor.rs        # Step-level execution
-│   ├── matrix.rs               # Matrix expansion
-│   └── output.rs               # Output capture (GITHUB_OUTPUT, GITHUB_ENV)
-├── actions/                     # NEW: Action support
+│   ├── executor.rs           # Pipeline executor (shared)
+│   ├── graph.rs              # DAG builder (shared)
+│   ├── matrix.rs             # Matrix expansion (shared + GH include/exclude)
+│   ├── context.rs            # Runtime context
+│   └── events.rs             # Execution events
+├── runners/
 │   ├── mod.rs
-│   ├── resolver.rs             # Action resolution and download
-│   ├── cache.rs                # Action caching
-│   └── runners/
-│       ├── composite.rs
-│       ├── javascript.rs
-│       └── docker.rs
-├── pipeline/                    # KEEP: Original simple pipeline (legacy)
+│   ├── shell.rs              # Shell runner (shared)
+│   ├── task.rs               # Azure DevOps task runner
+│   └── container.rs          # Container runner (shared)
+├── tasks/
 │   ├── mod.rs
-│   ├── models.rs
-│   ├── parser.rs
-│   ├── executor.rs
-│   └── runners/
-│       └── shell.rs
-└── services/                    # NEW: Service containers
+│   ├── cache.rs              # Task cache (Azure DevOps tasks)
+│   └── manifest.rs           # task.json parser
+├── testing/
+│   ├── mod.rs
+│   ├── runner.rs             # Test runner
+│   ├── assertions.rs         # Assertion engine
+│   ├── parser.rs             # Test file parser
+│   └── reporter.rs           # JUnit/TAP/terminal output
+├── workflow/                  # GitHub Actions workflow support
+│   ├── mod.rs
+│   ├── models.rs             # Workflow, Job, Step structs (exists, to be extended)
+│   ├── parser.rs             # YAML parsing (exists, to be extended)
+│   ├── context.rs            # NEW: GitHub Actions context providers
+│   └── trigger.rs            # NEW: Trigger parsing and simulation
+└── actions/                   # NEW: GitHub Actions action support
     ├── mod.rs
-    └── docker.rs
+    ├── resolver.rs            # Action resolution and download
+    ├── cache.rs               # Action caching
+    └── runners/
+        ├── composite.rs       # Composite action runner
+        ├── javascript.rs      # JavaScript action runner
+        └── docker.rs          # Docker action runner
 ```
 
 ---
@@ -201,43 +201,42 @@ pipeline-service/src/
 ## Implementation Order
 
 ### Week 1: Foundation
-1. [ ] Create `workflow/models.rs` with GitHub Actions structs
-2. [ ] Create `workflow/parser.rs` for YAML parsing
+1. [ ] Extend `workflow/models.rs` with full GitHub Actions structs
+2. [ ] Extend `workflow/parser.rs` for full YAML parsing
 3. [ ] Add tests for parsing real GitHub Actions workflows
 
 ### Week 2: Expressions
-4. [ ] Implement expression lexer
-5. [ ] Implement expression parser (AST)
-6. [ ] Implement expression evaluator
-7. [ ] Add built-in functions
+4. [ ] Add GitHub Actions-specific context names to expression evaluator
+5. [ ] Add GitHub-specific functions (`hashFiles`, `toJSON`, `fromJSON`)
+6. [ ] Add `success()`, `failure()`, `always()`, `cancelled()` status functions
 
 ### Week 3: Context & Execution
-8. [ ] Implement context system
-9. [ ] Create job DAG executor
-10. [ ] Implement `if` conditional evaluation
-11. [ ] Implement output capture (GITHUB_OUTPUT)
+7. [ ] Implement GitHub Actions context system
+8. [ ] Extend DAG executor for `needs` dependencies
+9. [ ] Implement `if` conditional evaluation with GitHub Actions contexts
+10. [ ] Implement output capture (`$GITHUB_OUTPUT`)
 
 ### Week 4: Matrix & Integration
-12. [ ] Implement matrix expansion
-13. [ ] Add secrets support (from .env file)
-14. [ ] CLI integration for running workflows
-15. [ ] End-to-end testing
+11. [ ] Extend matrix expansion for `include`/`exclude`
+12. [ ] Add secrets support (from `.env` file)
+13. [ ] CLI integration for running workflows
+14. [ ] End-to-end testing
 
 ### Future Weeks
-16. [ ] Action resolution and execution
-17. [ ] Service containers
-18. [ ] Caching and artifacts
-19. [ ] Reusable workflows
+15. [ ] Action resolution and execution
+16. [ ] Service containers
+17. [ ] Caching and artifacts
+18. [ ] Reusable workflows
 
 ---
 
 ## Testing Strategy
 
 ### Unit Tests
-- Expression lexer/parser
+- Expression lexer/parser (GitHub Actions contexts)
 - Context evaluation
-- Matrix expansion
-- DAG ordering
+- Matrix expansion with include/exclude
+- DAG ordering from `needs`
 
 ### Integration Tests
 - Parse real GitHub Actions workflows from popular repos

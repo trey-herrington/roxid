@@ -4,7 +4,9 @@
 pub mod azure;
 pub mod error;
 pub mod models;
+pub mod template;
 
 pub use azure::{normalize_pipeline, AzureParser, PipelineValidator};
 pub use error::{ParseError, ParseErrorKind, ParseResult, ValidationError};
 pub use models::*;
+pub use template::{TemplateEngine, TemplateError, TemplateErrorKind};

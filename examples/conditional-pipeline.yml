@@ -1,0 +1,193 @@
+# Conditional Pipeline
+# Demonstrates runtime conditions, compile-time template expressions (${{ if }}),
+# custom conditions on stages/jobs/steps, and variable-driven flow control.
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - "feature/*"
+      - "hotfix/*"
+
+parameters:
+  - name: runSecurityScan
+    displayName: Run security scan
+    type: boolean
+    default: true
+
+  - name: deployTarget
+    displayName: Deployment target
+    type: string
+    default: none
+    values:
+      - none
+      - dev
+      - staging
+      - production
+
+  - name: testSuites
+    displayName: Test suites to run
+    type: object
+    default:
+      - unit
+      - integration
+
+variables:
+  isMainBranch: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+  isDevelop: $[eq(variables['Build.SourceBranch'], 'refs/heads/develop')]
+  isFeatureBranch: $[startsWith(variables['Build.SourceBranch'], 'refs/heads/feature/')]
+  isHotfix: $[startsWith(variables['Build.SourceBranch'], 'refs/heads/hotfix/')]
+
+stages:
+  # ---- Always runs ----
+  - stage: Build
+    displayName: Build
+    jobs:
+      - job: Compile
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo build --workspace
+            displayName: Build workspace
+
+          - script: |
+              echo "##vso[task.setvariable variable=hasChanges;isoutput=true]true"
+            name: detectChanges
+            displayName: Detect changes
+
+  # ---- Test stage with conditional steps ----
+  - stage: Test
+    displayName: Test
+    dependsOn: Build
+    jobs:
+      - job: UnitTests
+        displayName: Unit tests
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo test --workspace --lib
+            displayName: Run unit tests
+
+          # Only run doc tests on main
+          - script: cargo test --workspace --doc
+            displayName: Run doc tests
+            condition: eq(variables.isMainBranch, 'true')
+
+      - job: IntegrationTests
+        displayName: Integration tests
+        pool:
+          vmImage: ubuntu-latest
+        # Only run integration tests on main or develop
+        condition: or(eq(variables.isMainBranch, 'true'), eq(variables.isDevelop, 'true'))
+        steps:
+          - script: cargo test --test integration
+            displayName: Run integration tests
+
+      # Compile-time conditional: only include this job if security scan is enabled
+      - ${{ if eq(parameters.runSecurityScan, true) }}:
+        - job: SecurityScan
+          displayName: Security scan
+          pool:
+            vmImage: ubuntu-latest
+          steps:
+            - script: cargo audit
+              displayName: Run cargo audit
+
+            - script: cargo deny check
+              displayName: Check dependency licenses
+              continueOnError: true
+
+      # Compile-time each: generate jobs for each test suite
+      - ${{ each suite in parameters.testSuites }}:
+        - job: TestSuite_${{ suite }}
+          displayName: "Run ${{ suite }} tests"
+          pool:
+            vmImage: ubuntu-latest
+          steps:
+            - script: cargo test --test ${{ suite }}
+              displayName: "Execute ${{ suite }} suite"
+
+  # ---- Quality gate with complex conditions ----
+  - stage: QualityGate
+    displayName: Quality Gate
+    dependsOn: Test
+    condition: |
+      and(
+        succeeded(),
+        or(
+          eq(variables.isMainBranch, 'true'),
+          eq(variables.isDevelop, 'true'),
+          eq(variables.isHotfix, 'true')
+        )
+      )
+    jobs:
+      - job: CoverageCheck
+        displayName: Code coverage check
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              cargo install cargo-tarpaulin --locked
+              cargo tarpaulin --workspace --out Xml
+            displayName: Generate coverage report
+
+          - script: |
+              COVERAGE=$(cargo tarpaulin --workspace --print-rust-flags 2>&1 | grep -oP '\d+\.\d+%' | head -1)
+              echo "Coverage: $COVERAGE"
+              echo "##vso[task.setvariable variable=coveragePercent;isoutput=true]$COVERAGE"
+            name: coverage
+            displayName: Extract coverage
+
+      - job: LintCheck
+        displayName: Lint gate
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo fmt --check
+            displayName: Format check
+            condition: always()
+
+          - script: cargo clippy -- -D warnings
+            displayName: Clippy (strict)
+            condition: succeeded()
+
+  # ---- Deploy stage with compile-time conditional on parameter ----
+  - ${{ if ne(parameters.deployTarget, 'none') }}:
+    - stage: Deploy
+      displayName: Deploy to ${{ parameters.deployTarget }}
+      dependsOn: QualityGate
+      # Runtime condition: only deploy if quality gate passed
+      condition: succeeded()
+      jobs:
+        - ${{ if eq(parameters.deployTarget, 'production') }}:
+          - job: ProductionApproval
+            displayName: Await production approval
+            pool: server
+            steps:
+              - script: echo "Manual approval required for production"
+                displayName: Approval gate
+
+        - job: DeployApp
+          displayName: Deploy to ${{ parameters.deployTarget }}
+          ${{ if eq(parameters.deployTarget, 'production') }}:
+            dependsOn: ProductionApproval
+          pool:
+            vmImage: ubuntu-latest
+          steps:
+            - ${{ if eq(parameters.deployTarget, 'production') }}:
+              - script: echo "Deploying to PRODUCTION - extra caution!"
+                displayName: Production warning
+
+            - ${{ elseif eq(parameters.deployTarget, 'staging') }}:
+              - script: echo "Deploying to staging environment"
+                displayName: Staging deploy notice
+
+            - ${{ else }}:
+              - script: echo "Deploying to dev environment"
+                displayName: Dev deploy notice
+
+            - script: |
+                echo "Deploying Roxid to ${{ parameters.deployTarget }}"
+                echo "Branch: $(Build.SourceBranch)"
+              displayName: Execute deployment

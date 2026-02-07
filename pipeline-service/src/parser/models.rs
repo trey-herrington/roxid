@@ -368,7 +368,7 @@ pub enum PoolDemands {
 // Stage
 // =============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Stage {
     /// Stage identifier
@@ -410,7 +410,7 @@ pub struct Stage {
 // Job
 // =============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
     /// Job identifier (mutually exclusive with deployment)

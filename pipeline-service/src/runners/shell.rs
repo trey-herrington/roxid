@@ -49,7 +49,7 @@ impl Shell {
 }
 
 /// Configuration for shell execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ShellConfig {
     /// Working directory for the script
     pub working_dir: Option<String>,
@@ -59,17 +59,6 @@ pub struct ShellConfig {
     pub error_action_preference: Option<String>,
     /// Timeout in seconds (None = no timeout)
     pub timeout: Option<Duration>,
-}
-
-impl Default for ShellConfig {
-    fn default() -> Self {
-        Self {
-            working_dir: None,
-            fail_on_stderr: false,
-            error_action_preference: None,
-            timeout: None,
-        }
-    }
 }
 
 /// Output collected during script execution
@@ -419,9 +408,9 @@ impl ShellRunner {
         fail_on_stderr: bool,
         duration: Duration,
     ) -> StepResult {
-        let status = if output.exit_code.map(|c| c != 0).unwrap_or(true) {
-            StepStatus::Failed
-        } else if fail_on_stderr && !output.stderr.is_empty() {
+        let status = if output.exit_code.map(|c| c != 0).unwrap_or(true)
+            || (fail_on_stderr && !output.stderr.is_empty())
+        {
             StepStatus::Failed
         } else {
             StepStatus::Succeeded
@@ -548,7 +537,10 @@ fn parse_logging_commands(output: &str) -> (HashMap<String, String>, HashMap<Str
                 for prop in props.split(';') {
                     let prop = prop.trim();
                     if let Some(result) = prop.strip_prefix("result=") {
-                        variables.insert("_TASK_RESULT".to_string(), Value::String(result.to_string()));
+                        variables.insert(
+                            "_TASK_RESULT".to_string(),
+                            Value::String(result.to_string()),
+                        );
                     }
                 }
             }

@@ -31,10 +31,14 @@ impl AzureParser {
     }
 
     /// Parse pipeline with template resolution
-    pub fn parse_with_templates<P: AsRef<Path>>(path: P, _repo_root: P) -> ParseResult<Pipeline> {
-        // For now, just parse without template resolution
-        // Template resolution will be implemented in Phase 4
-        Self::parse_file(path)
+    ///
+    /// Resolves all template references (step, job, stage, variable, extends)
+    /// relative to the given repository root directory.
+    pub fn parse_with_templates<P: AsRef<Path>>(path: P, repo_root: P) -> ParseResult<Pipeline> {
+        let pipeline = Self::parse_file(&path)?;
+        let mut engine =
+            crate::parser::template::TemplateEngine::new(repo_root.as_ref().to_path_buf());
+        engine.resolve_pipeline(pipeline)
     }
 }
 

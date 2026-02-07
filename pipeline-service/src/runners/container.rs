@@ -1,7 +1,9 @@
 // Container Runner
 // Executes jobs inside Docker containers
 
-use crate::parser::models::{ContainerRef, ContainerSpec, Job, JobResult, JobStatus, Step, StepResult, StepStatus};
+use crate::parser::models::{
+    ContainerRef, ContainerSpec, Job, JobResult, JobStatus, Step, StepResult, StepStatus,
+};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -203,7 +205,10 @@ impl ContainerRunner {
     }
 
     /// Stop service containers
-    pub async fn stop_service_containers(&self, handles: ServiceHandles) -> Result<(), ContainerError> {
+    pub async fn stop_service_containers(
+        &self,
+        handles: ServiceHandles,
+    ) -> Result<(), ContainerError> {
         for (_, handle) in handles.services {
             self.stop_container(&handle).await?;
         }
@@ -211,7 +216,10 @@ impl ContainerRunner {
     }
 
     /// Parse a container reference into a spec
-    fn parse_container_ref(&self, container: &ContainerRef) -> Result<ContainerSpec, ContainerError> {
+    fn parse_container_ref(
+        &self,
+        container: &ContainerRef,
+    ) -> Result<ContainerSpec, ContainerError> {
         match container {
             ContainerRef::Image(image) => Ok(ContainerSpec {
                 image: image.clone(),
@@ -490,7 +498,11 @@ impl ContainerRunner {
                     display_name: step.display_name.clone(),
                     status,
                     output: stdout,
-                    error: if stderr.is_empty() { None } else { Some(stderr) },
+                    error: if stderr.is_empty() {
+                        None
+                    } else {
+                        Some(stderr)
+                    },
                     duration: start.elapsed(),
                     exit_code: output.status.code(),
                     outputs: HashMap::new(),
@@ -542,7 +554,7 @@ fn uuid_v4_simple() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let nanos = duration.as_nanos();
-    format!("{:08x}", (nanos as u32) ^ (std::process::id() as u32))
+    format!("{:08x}", (nanos as u32) ^ std::process::id())
 }
 
 #[cfg(test)]

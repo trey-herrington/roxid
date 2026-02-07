@@ -3,32 +3,22 @@ name = "pipeline-service"
 version = "0.8.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "gRPC pipeline execution service for roxid"
+description = "Pipeline execution service for roxid"
 repository = "https://github.com/trey-herrington/roxid"
 documentation = "https://docs.rs/pipeline-service"
 readme = false
 publish = true
-include = ["src/**/*", "build.rs", "proto/**/*"]
-
-[[bin]]
-name = "pipeline-service"
-path = "src/bin/server.rs"
+include = ["src/**/*"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 tokio = { version = "1.0", features = ["full"] }
-tokio-stream = "0.1"
 thiserror = "1.0"
-tonic = "0.12"
-prost = "0.13"
 async-trait = "0.1"
 dirs = "5.0"
 which = "6.0"
-
-[build-dependencies]
-tonic-build = "0.12"
 
 [dev-dependencies]
 tempfile = "3.0"

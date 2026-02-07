@@ -1,0 +1,35 @@
+# Variable Template: Environment-Specific Variables
+# Variables that differ per deployment environment.
+
+parameters:
+  - name: environment
+    type: string
+    default: dev
+
+variables:
+  - name: envName
+    value: ${{ parameters.environment }}
+
+  - ${{ if eq(parameters.environment, 'dev') }}:
+    - name: replicas
+      value: "1"
+    - name: resourceGroup
+      value: rg-roxid-dev
+    - name: clusterName
+      value: aks-roxid-dev
+
+  - ${{ if eq(parameters.environment, 'staging') }}:
+    - name: replicas
+      value: "2"
+    - name: resourceGroup
+      value: rg-roxid-staging
+    - name: clusterName
+      value: aks-roxid-staging
+
+  - ${{ if eq(parameters.environment, 'production') }}:
+    - name: replicas
+      value: "3"
+    - name: resourceGroup
+      value: rg-roxid-prod
+    - name: clusterName
+      value: aks-roxid-prod

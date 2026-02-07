@@ -293,6 +293,22 @@ impl<'a> Evaluator<'a> {
     }
 
     fn lookup_context(&self, name: &str) -> Result<Value, EvalError> {
+        // Check for direct parameter match first (iteration variables from ${{ each }}
+        // shadow built-in context names like 'env')
+        if let Some(value) = self.context.parameters.get(name) {
+            // Only shadow built-in contexts for non-context names, OR when the
+            // parameter name matches a built-in context name (iteration variable).
+            // The full context objects "variables" and "parameters" should still
+            // be accessible via their full paths, so only shadow them if the
+            // parameter name is NOT one of the primary context prefixes that
+            // users access with dot-notation (variables.x, parameters.x).
+            let is_primary_context =
+                matches!(name.to_lowercase().as_str(), "variables" | "parameters");
+            if !is_primary_context {
+                return Ok(value.clone());
+            }
+        }
+
         match name.to_lowercase().as_str() {
             "variables" => Ok(Value::Object(
                 self.context

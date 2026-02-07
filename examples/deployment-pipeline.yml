@@ -1,0 +1,206 @@
+# Deployment Pipeline
+# Demonstrates deployment jobs with environments, approval gates,
+# rolling and canary deployment strategies, and service connections.
+
+trigger:
+  branches:
+    include:
+      - main
+      - "release/*"
+
+parameters:
+  - name: deployEnvironment
+    displayName: Target environment
+    type: string
+    default: staging
+    values:
+      - dev
+      - staging
+      - production
+
+  - name: deployStrategy
+    displayName: Deployment strategy
+    type: string
+    default: rolling
+    values:
+      - runOnce
+      - rolling
+      - canary
+
+variables:
+  - name: registryUrl
+    value: roxid.azurecr.io
+  - name: imageName
+    value: roxid-app
+
+stages:
+  # ---- Build stage ----
+  - stage: Build
+    displayName: Build & Push Image
+    jobs:
+      - job: BuildImage
+        displayName: Build container image
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo build --release --bin roxid
+            displayName: Build release binary
+
+          - task: Docker@2
+            inputs:
+              containerRegistry: $(registryUrl)
+              repository: $(imageName)
+              command: buildAndPush
+              Dockerfile: Dockerfile
+              tags: |
+                $(Build.BuildId)
+                latest
+            displayName: Build and push Docker image
+
+          - script: |
+              echo "##vso[task.setvariable variable=imageTag;isoutput=true]$(Build.BuildId)"
+            name: setTag
+            displayName: Set image tag output
+
+  # ---- Deploy to Dev ----
+  - stage: DeployDev
+    displayName: Deploy to Dev
+    dependsOn: Build
+    condition: succeeded()
+    variables:
+      imageTag: $[stageDependencies.Build.BuildImage.outputs['setTag.imageTag']]
+    jobs:
+      - deployment: DeployDevJob
+        displayName: Deploy to dev environment
+        environment:
+          name: roxid-dev
+          resourceType: Kubernetes
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  displayName: Download artifacts
+
+                - script: |
+                    echo "Deploying $(imageName):$(imageTag) to dev"
+                    echo "kubectl set image deployment/roxid roxid=$(registryUrl)/$(imageName):$(imageTag)"
+                  displayName: Deploy to dev cluster
+
+            routeTraffic:
+              steps:
+                - script: echo "Routing traffic to new deployment in dev"
+                  displayName: Route traffic
+
+            postRouteTraffic:
+              steps:
+                - script: |
+                    echo "Running smoke tests against dev..."
+                    curl -sf http://roxid-dev.internal/health || exit 1
+                  displayName: Smoke test dev
+
+  # ---- Deploy to Staging (Rolling) ----
+  - stage: DeployStaging
+    displayName: Deploy to Staging
+    dependsOn: DeployDev
+    condition: and(succeeded(), in('${{ parameters.deployEnvironment }}', 'staging', 'production'))
+    variables:
+      imageTag: $[stageDependencies.Build.BuildImage.outputs['setTag.imageTag']]
+    jobs:
+      - deployment: DeployStagingJob
+        displayName: Rolling deploy to staging
+        environment:
+          name: roxid-staging
+          resourceType: Kubernetes
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          rolling:
+            maxParallel: 2
+            preDeploy:
+              steps:
+                - script: echo "Pre-deploy checks for staging"
+                  displayName: Pre-deploy validation
+            deploy:
+              steps:
+                - script: |
+                    echo "Rolling deploy of $(imageName):$(imageTag) to staging"
+                  displayName: Deploy to staging
+            routeTraffic:
+              steps:
+                - script: echo "Incrementally routing traffic in staging"
+                  displayName: Route traffic
+            postRouteTraffic:
+              steps:
+                - script: |
+                    echo "Running integration tests against staging..."
+                    cargo test --test integration_staging
+                  displayName: Integration tests
+            onFailure:
+              steps:
+                - script: echo "Rolling back staging deployment!"
+                  displayName: Rollback staging
+            onSuccess:
+              steps:
+                - script: echo "Staging deployment successful!"
+                  displayName: Report success
+
+  # ---- Deploy to Production (Canary) ----
+  - stage: DeployProduction
+    displayName: Deploy to Production
+    dependsOn: DeployStaging
+    condition: and(succeeded(), eq('${{ parameters.deployEnvironment }}', 'production'))
+    variables:
+      imageTag: $[stageDependencies.Build.BuildImage.outputs['setTag.imageTag']]
+    jobs:
+      - deployment: DeployProductionJob
+        displayName: Canary deploy to production
+        environment:
+          name: roxid-production
+          resourceType: Kubernetes
+          tags:
+            - production
+            - us-east
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          canary:
+            increments:
+              - 10
+              - 25
+              - 50
+              - 100
+            preDeploy:
+              steps:
+                - script: |
+                    echo "Pre-deploy: verifying production readiness"
+                    echo "Image: $(registryUrl)/$(imageName):$(imageTag)"
+                  displayName: Production readiness check
+            deploy:
+              steps:
+                - script: |
+                    echo "Canary deploy at $(Strategy.CycleNumber)% to production"
+                  displayName: Canary deploy
+            routeTraffic:
+              steps:
+                - script: echo "Shifting $(Strategy.CycleNumber)% traffic to canary"
+                  displayName: Shift traffic
+            postRouteTraffic:
+              steps:
+                - script: |
+                    echo "Monitoring canary at $(Strategy.CycleNumber)%..."
+                    sleep 30
+                    echo "Canary metrics look healthy"
+                  displayName: Monitor canary health
+                  timeoutInMinutes: 5
+            onFailure:
+              steps:
+                - script: |
+                    echo "ALERT: Canary failed! Rolling back production..."
+                  displayName: Emergency rollback
+            onSuccess:
+              steps:
+                - script: echo "Production canary deployment complete!"
+                  displayName: Deployment complete

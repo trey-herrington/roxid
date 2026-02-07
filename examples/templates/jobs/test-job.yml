@@ -1,0 +1,47 @@
+# Job Template: Test Job
+# Reusable test job supporting multiple test scopes.
+
+parameters:
+  - name: vmImage
+    type: string
+    default: ubuntu-latest
+  - name: testScope
+    type: string
+    default: unit
+    values:
+      - unit
+      - integration
+      - all
+  - name: coverageEnabled
+    type: boolean
+    default: false
+
+jobs:
+  - job: Test_${{ parameters.testScope }}
+    displayName: "${{ parameters.testScope }} tests"
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+      - checkout: self
+
+      - ${{ if eq(parameters.testScope, 'unit') }}:
+        - script: cargo test --workspace --lib
+          displayName: Run unit tests
+
+      - ${{ if eq(parameters.testScope, 'integration') }}:
+        - script: cargo test --test integration
+          displayName: Run integration tests
+
+      - ${{ if eq(parameters.testScope, 'all') }}:
+        - script: cargo test --workspace
+          displayName: Run all tests
+
+      - ${{ if eq(parameters.coverageEnabled, true) }}:
+        - script: |
+            cargo install cargo-tarpaulin --locked
+            cargo tarpaulin --workspace --out Xml --output-dir coverage
+          displayName: Generate coverage report
+
+        - publish: coverage
+          artifact: coverage-${{ parameters.testScope }}
+          displayName: Publish coverage

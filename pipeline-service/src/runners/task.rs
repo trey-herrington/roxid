@@ -208,7 +208,10 @@ impl TaskRunner {
         env: &HashMap<String, String>,
         working_dir: &Path,
     ) -> Result<StepResult, TaskRunnerError> {
-        let target_type = inputs.get("targetType").map(|s| s.as_str()).unwrap_or("inline");
+        let target_type = inputs
+            .get("targetType")
+            .map(|s| s.as_str())
+            .unwrap_or("inline");
 
         let script = match target_type {
             "inline" => inputs
@@ -267,7 +270,10 @@ impl TaskRunner {
         env: &HashMap<String, String>,
         working_dir: &Path,
     ) -> Result<StepResult, TaskRunnerError> {
-        let target_type = inputs.get("targetType").map(|s| s.as_str()).unwrap_or("inline");
+        let target_type = inputs
+            .get("targetType")
+            .map(|s| s.as_str())
+            .unwrap_or("inline");
         let use_pwsh = inputs.get("pwsh").map(|s| s == "true").unwrap_or(false);
 
         let script = match target_type {
@@ -367,10 +373,9 @@ impl TaskRunner {
         env: &HashMap<String, String>,
         working_dir: &Path,
     ) -> Result<StepResult, TaskRunnerError> {
-        let exec = task
-            .manifest
-            .primary_execution()
-            .ok_or_else(|| TaskRunnerError::UnsupportedExecution("No execution defined".to_string()))?;
+        let exec = task.manifest.primary_execution().ok_or_else(|| {
+            TaskRunnerError::UnsupportedExecution("No execution defined".to_string())
+        })?;
 
         let target_path = task.path.join(&exec.target);
 
@@ -434,11 +439,7 @@ impl TaskRunner {
         );
 
         // Build the command
-        let script = format!(
-            "{} {}",
-            node_path.display(),
-            target.display()
-        );
+        let script = format!("{} {}", node_path.display(), target.display());
 
         let config = ShellConfig {
             working_dir: Some(task.path.to_string_lossy().to_string()),
@@ -488,10 +489,7 @@ impl TaskRunner {
         );
 
         // Build PowerShell command to execute the script
-        let script = format!(
-            "& '{}' ",
-            target.display()
-        );
+        let script = format!("& '{}' ", target.display());
 
         let config = ShellConfig {
             working_dir: Some(task.path.to_string_lossy().to_string()),
@@ -587,14 +585,15 @@ mod tests {
         let (runner, _temp_dir) = create_test_runner();
         let mut inputs = HashMap::new();
         inputs.insert("targetType".to_string(), "inline".to_string());
-        inputs.insert("script".to_string(), "echo 'Hello from Bash task'".to_string());
+        inputs.insert(
+            "script".to_string(),
+            "echo 'Hello from Bash task'".to_string(),
+        );
 
         let env = HashMap::new();
         let working_dir = std::env::current_dir().unwrap();
 
-        let result = runner
-            .execute_bash_task(&inputs, &env, &working_dir)
-            .await;
+        let result = runner.execute_bash_task(&inputs, &env, &working_dir).await;
 
         // Bash might not be available on all systems
         if let Ok(step_result) = result {

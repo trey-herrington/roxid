@@ -1,0 +1,30 @@
+# Step Template: Build Steps
+# Reusable build steps with configurable options.
+
+parameters:
+  - name: buildConfig
+    type: string
+    default: Debug
+  - name: cargoFlags
+    type: string
+    default: "--workspace"
+  - name: runTests
+    type: boolean
+    default: true
+
+steps:
+  - script: |
+      echo "Building with configuration: ${{ parameters.buildConfig }}"
+      if [ "${{ parameters.buildConfig }}" = "Release" ]; then
+        cargo build ${{ parameters.cargoFlags }} --release
+      else
+        cargo build ${{ parameters.cargoFlags }}
+      fi
+    displayName: "Build (${{ parameters.buildConfig }})"
+    timeoutInMinutes: 15
+
+  - ${{ if eq(parameters.runTests, true) }}:
+    - script: cargo test ${{ parameters.cargoFlags }}
+      displayName: Run tests
+      env:
+        RUST_BACKTRACE: "1"

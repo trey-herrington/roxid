@@ -122,8 +122,10 @@ impl TaskCache {
 
     /// Create a task cache with a specific cache directory
     pub fn with_cache_dir(cache_dir: impl AsRef<Path>) -> Self {
-        let mut config = TaskCacheConfig::default();
-        config.cache_dir = cache_dir.as_ref().to_path_buf();
+        let config = TaskCacheConfig {
+            cache_dir: cache_dir.as_ref().to_path_buf(),
+            ..Default::default()
+        };
         Self::with_config(config)
     }
 
@@ -247,13 +249,10 @@ impl TaskCache {
         version: &str,
     ) -> Result<CachedTask, TaskCacheError> {
         match source {
-            TaskSource::AzureDevOps => {
-                self.download_from_azure_devops(name, version).await
-            }
+            TaskSource::AzureDevOps => self.download_from_azure_devops(name, version).await,
             TaskSource::LocalDir(dir) => self.load_from_local_dir(dir, name, version).await,
             TaskSource::CustomUrl(pattern) => {
-                self.download_from_custom_url(pattern, name, version)
-                    .await
+                self.download_from_custom_url(pattern, name, version).await
             }
         }
     }

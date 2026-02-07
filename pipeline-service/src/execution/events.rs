@@ -48,10 +48,7 @@ pub enum ExecutionEvent {
     },
 
     /// Stage was skipped (condition evaluated to false)
-    StageSkipped {
-        stage_name: String,
-        reason: String,
-    },
+    StageSkipped { stage_name: String, reason: String },
 
     /// Job execution started
     JobStarted {

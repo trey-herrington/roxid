@@ -1,0 +1,152 @@
+# Container Pipeline
+# Demonstrates container jobs, service containers (postgres, redis),
+# container resources, and mapped volumes/ports.
+
+trigger:
+  - main
+  - develop
+
+resources:
+  containers:
+    - container: rust_builder
+      image: rust:1.75-bookworm
+      env:
+        CARGO_TERM_COLOR: always
+      volumes:
+        - /tmp/cargo-cache:/usr/local/cargo/registry
+      options: "--cpus 2 --memory 4g"
+
+    - container: postgres_db
+      image: postgres:16-alpine
+      env:
+        POSTGRES_DB: roxid_test
+        POSTGRES_USER: roxid
+        POSTGRES_PASSWORD: testpassword
+      ports:
+        - 5432:5432
+
+    - container: redis_cache
+      image: redis:7-alpine
+      ports:
+        - 6379:6379
+
+    - container: minio_storage
+      image: minio/minio:latest
+      env:
+        MINIO_ROOT_USER: minioadmin
+        MINIO_ROOT_PASSWORD: minioadmin
+      ports:
+        - 9000:9000
+
+variables:
+  DATABASE_URL: "postgres://roxid:testpassword@localhost:5432/roxid_test"
+  REDIS_URL: "redis://localhost:6379"
+
+jobs:
+  # ---- Build inside a Rust container ----
+  - job: ContainerBuild
+    displayName: Build in Rust container
+    container: rust_builder
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - script: |
+          rustc --version
+          cargo --version
+        displayName: Show Rust version
+
+      - script: cargo build --workspace
+        displayName: Build workspace
+
+      - script: cargo test --workspace --lib
+        displayName: Run unit tests
+
+  # ---- Integration tests with service containers ----
+  - job: IntegrationTests
+    displayName: Integration tests with services
+    pool:
+      vmImage: ubuntu-latest
+    container: rust_builder
+    services:
+      postgres: postgres_db
+      redis: redis_cache
+    steps:
+      - script: |
+          echo "Waiting for Postgres to be ready..."
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 && break
+            sleep 1
+          done
+        displayName: Wait for database
+
+      - script: |
+          echo "Waiting for Redis to be ready..."
+          redis-cli -h localhost ping || true
+        displayName: Wait for Redis
+
+      - script: |
+          echo "Running database migrations..."
+          cargo run --bin roxid -- migrate
+        displayName: Run migrations
+        env:
+          DATABASE_URL: $(DATABASE_URL)
+
+      - script: cargo test --test integration
+        displayName: Run integration tests
+        env:
+          DATABASE_URL: $(DATABASE_URL)
+          REDIS_URL: $(REDIS_URL)
+          RUST_BACKTRACE: "1"
+
+  # ---- Job with inline container spec ----
+  - job: SecurityScan
+    displayName: Security audit
+    pool:
+      vmImage: ubuntu-latest
+    container:
+      image: rust:1.75-slim
+      env:
+        CARGO_TERM_COLOR: always
+      options: "--memory 2g"
+    steps:
+      - script: |
+          cargo install cargo-audit --locked
+          cargo audit
+        displayName: Run cargo audit
+
+      - script: |
+          cargo install cargo-deny --locked
+          cargo deny check
+        displayName: Check dependencies
+        continueOnError: true
+
+  # ---- Multi-service end-to-end tests ----
+  - job: E2ETests
+    displayName: End-to-end tests
+    dependsOn:
+      - ContainerBuild
+      - IntegrationTests
+    pool:
+      vmImage: ubuntu-latest
+    container: rust_builder
+    services:
+      postgres: postgres_db
+      redis: redis_cache
+      minio: minio_storage
+    timeoutInMinutes: 30
+    steps:
+      - script: |
+          echo "Running full E2E test suite"
+          echo "Postgres: $(DATABASE_URL)"
+          echo "Redis: $(REDIS_URL)"
+          echo "MinIO: http://localhost:9000"
+        displayName: Display service endpoints
+
+      - script: cargo test --test e2e -- --nocapture
+        displayName: Run E2E tests
+        env:
+          DATABASE_URL: $(DATABASE_URL)
+          REDIS_URL: $(REDIS_URL)
+          MINIO_ENDPOINT: "http://localhost:9000"
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin

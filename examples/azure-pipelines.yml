@@ -1,0 +1,358 @@
+# Full-Featured Azure DevOps Pipeline for Roxid
+# Exercises the broadest set of parser features in a single file:
+# triggers, PR triggers, schedules, resources, parameters, variables,
+# stages, jobs, strategies, conditions, tasks, and more.
+
+name: "Roxid-$(Date:yyyyMMdd)-$(Rev:rr)"
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+      - develop
+      - "release/*"
+    exclude:
+      - "experimental/*"
+  paths:
+    include:
+      - pipeline-service/
+      - roxid-tui/
+      - roxid-cli/
+      - Cargo.toml
+    exclude:
+      - "**/*.md"
+      - docs/
+  tags:
+    include:
+      - "v*"
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - "*.md"
+  drafts: false
+
+schedules:
+  - cron: "0 3 * * Mon-Fri"
+    displayName: Nightly build (weekdays)
+    branches:
+      include:
+        - main
+    always: false
+    batch: true
+
+  - cron: "0 6 * * 0"
+    displayName: Weekly full test (Sunday)
+    branches:
+      include:
+        - main
+        - develop
+    always: true
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: Roxid/pipeline-templates
+      ref: refs/heads/main
+
+    - repository: tools
+      type: github
+      name: roxid-org/devops-tools
+      endpoint: github-connection
+
+  containers:
+    - container: rust_env
+      image: rust:1.75-bookworm
+      env:
+        CARGO_TERM_COLOR: always
+
+  pipelines:
+    - pipeline: upstream_libs
+      source: Roxid-Libraries
+      project: Roxid
+      trigger:
+        enabled: true
+        branches:
+          include:
+            - main
+
+parameters:
+  - name: buildConfiguration
+    displayName: Build configuration
+    type: string
+    default: Release
+    values:
+      - Debug
+      - Release
+
+  - name: runBenchmarks
+    displayName: Run performance benchmarks
+    type: boolean
+    default: false
+
+  - name: targetPlatforms
+    displayName: Target platforms
+    type: object
+    default:
+      - linux
+      - macos
+      - windows
+
+  - name: rustVersion
+    displayName: Rust toolchain version
+    type: string
+    default: stable
+
+variables:
+  - name: CARGO_TERM_COLOR
+    value: always
+  - name: RUST_BACKTRACE
+    value: "1"
+  - name: buildConfig
+    value: ${{ parameters.buildConfiguration }}
+  - group: roxid-secrets
+  - name: isReleaseBranch
+    value: $[or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))]
+
+lockBehavior: sequential
+
+stages:
+  # ======================================================================
+  # Stage 1: CI - Build, lint, and unit test
+  # ======================================================================
+  - stage: CI
+    displayName: Continuous Integration
+    jobs:
+      - job: Lint
+        displayName: Lint & Format
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - script: rustup component add rustfmt clippy
+            displayName: Install Rust components
+
+          - script: cargo fmt --check
+            displayName: Check formatting
+
+          - script: cargo clippy --workspace -- -D warnings
+            displayName: Run Clippy (strict)
+
+      - job: Build
+        displayName: "Build (${{ parameters.buildConfiguration }})"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            fetchTags: true
+            submodules: recursive
+
+          - script: |
+              rustup default ${{ parameters.rustVersion }}
+              rustc --version
+              cargo --version
+            displayName: Configure Rust ${{ parameters.rustVersion }}
+
+          - script: |
+              if [ "$(buildConfig)" = "Release" ]; then
+                cargo build --workspace --release
+              else
+                cargo build --workspace
+              fi
+            displayName: Build workspace ($(buildConfig))
+            timeoutInMinutes: 20
+
+          - script: |
+              VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "roxid-cli") | .version')
+              echo "##vso[task.setvariable variable=appVersion;isoutput=true]$VERSION"
+              echo "Roxid version: $VERSION"
+            name: metadata
+            displayName: Extract version metadata
+
+      - job: UnitTest
+        displayName: Unit tests
+        dependsOn: Build
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo test --workspace --lib -- --nocapture
+            displayName: Run unit tests
+            env:
+              RUST_LOG: debug
+
+          - script: cargo test --workspace --doc
+            displayName: Run doc tests
+
+  # ======================================================================
+  # Stage 2: Cross-platform build matrix
+  # ======================================================================
+  - stage: CrossPlatform
+    displayName: Cross-Platform Builds
+    dependsOn: CI
+    jobs:
+      - job: PlatformBuild
+        displayName: "Build on $(osName)"
+        strategy:
+          matrix:
+            linux:
+              osName: Linux
+              vmImage: ubuntu-latest
+              targetTriple: x86_64-unknown-linux-gnu
+              binaryName: roxid
+            macos:
+              osName: macOS
+              vmImage: macos-latest
+              targetTriple: x86_64-apple-darwin
+              binaryName: roxid
+            windows:
+              osName: Windows
+              vmImage: windows-latest
+              targetTriple: x86_64-pc-windows-msvc
+              binaryName: roxid.exe
+          maxParallel: 3
+        pool:
+          vmImage: $(vmImage)
+        workspace:
+          clean: outputs
+        steps:
+          - checkout: self
+
+          - script: |
+              rustup target add $(targetTriple)
+              cargo build --release --bin roxid --target $(targetTriple)
+            displayName: Build for $(targetTriple)
+            timeoutInMinutes: 30
+
+          - script: |
+              mkdir -p staging
+              cp target/$(targetTriple)/release/$(binaryName) staging/
+            displayName: Stage artifact
+
+          - publish: staging
+            artifact: "roxid-$(osName)"
+            displayName: Publish $(osName) binary
+
+  # ======================================================================
+  # Stage 3: Integration & E2E tests (container-based)
+  # ======================================================================
+  - stage: Integration
+    displayName: Integration Tests
+    dependsOn: CI
+    jobs:
+      - job: IntegrationTests
+        displayName: Integration tests
+        pool:
+          vmImage: ubuntu-latest
+        container: rust_env
+        timeoutInMinutes: 30
+        cancelTimeoutInMinutes: 2
+        steps:
+          - script: cargo test --test integration -- --nocapture
+            displayName: Run integration test suite
+            retryCountOnTaskFailure: 2
+            env:
+              TEST_ENVIRONMENT: ci
+              RUST_BACKTRACE: full
+
+      - job: PipelineParserTests
+        displayName: Pipeline parser tests
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: cargo test -p pipeline-service parser -- --nocapture
+            displayName: Test YAML parser
+
+          - script: cargo test -p pipeline-service expression -- --nocapture
+            displayName: Test expression engine
+
+          - script: cargo test -p pipeline-service template -- --nocapture
+            displayName: Test template resolver
+
+  # ======================================================================
+  # Stage 4: Benchmarks (optional, parameter-controlled)
+  # ======================================================================
+  - ${{ if eq(parameters.runBenchmarks, true) }}:
+    - stage: Benchmarks
+      displayName: Performance Benchmarks
+      dependsOn: CI
+      jobs:
+        - job: RunBenchmarks
+          displayName: Cargo benchmarks
+          pool:
+            vmImage: ubuntu-latest
+          steps:
+            - script: |
+                cargo bench --workspace -- --output-format bencher | tee benchmark_results.txt
+              displayName: Run benchmarks
+
+            - publish: benchmark_results.txt
+              artifact: benchmark-results
+              displayName: Publish benchmark results
+
+  # ======================================================================
+  # Stage 5: Package & Release
+  # ======================================================================
+  - stage: Package
+    displayName: Package Release
+    dependsOn:
+      - CrossPlatform
+      - Integration
+    condition: and(succeeded(), eq(variables.isReleaseBranch, 'true'))
+    variables:
+      appVersion: $[stageDependencies.CI.Build.outputs['metadata.appVersion']]
+    jobs:
+      - job: CreateRelease
+        displayName: Create release package
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - download: current
+            artifact: roxid-Linux
+            displayName: Download Linux binary
+
+          - download: current
+            artifact: roxid-macOS
+            displayName: Download macOS binary
+
+          - download: current
+            artifact: roxid-Windows
+            displayName: Download Windows binary
+
+          - script: |
+              echo "Packaging Roxid v$(appVersion)"
+              mkdir -p release
+              cp $(Pipeline.Workspace)/roxid-Linux/roxid release/roxid-linux-amd64
+              cp $(Pipeline.Workspace)/roxid-macOS/roxid release/roxid-darwin-amd64
+              cp $(Pipeline.Workspace)/roxid-Windows/roxid.exe release/roxid-windows-amd64.exe
+              cd release && sha256sum * > checksums.sha256
+            displayName: Prepare release artifacts
+
+          - publish: release
+            artifact: roxid-release-$(appVersion)
+            displayName: Publish release package
+
+      - job: PublishCrates
+        displayName: Publish to crates.io
+        dependsOn: CreateRelease
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              echo "Publishing Roxid crates..."
+              cargo publish -p pipeline-service --dry-run
+              cargo publish -p roxid-tui --dry-run
+              cargo publish -p roxid-cli --dry-run
+            displayName: Publish crates (dry-run)
+            env:
+              CARGO_REGISTRY_TOKEN: $(cratesIoToken)

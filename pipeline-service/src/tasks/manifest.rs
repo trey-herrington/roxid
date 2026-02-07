@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 
 /// Errors that can occur when parsing task manifests
@@ -99,6 +100,15 @@ pub struct TaskManifest {
     pub demands: Option<Vec<String>>,
 }
 
+impl FromStr for TaskManifest {
+    type Err = TaskManifestError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let manifest: TaskManifest = serde_json::from_str(s)?;
+        Ok(manifest)
+    }
+}
+
 impl TaskManifest {
     /// Parse a task manifest from a file path
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, TaskManifestError> {
@@ -108,13 +118,12 @@ impl TaskManifest {
         }
 
         let content = fs::read_to_string(path)?;
-        Self::from_str(&content)
+        Self::parse_str(&content)
     }
 
     /// Parse a task manifest from JSON string
-    pub fn from_str(content: &str) -> Result<Self, TaskManifestError> {
-        let manifest: TaskManifest = serde_json::from_str(content)?;
-        Ok(manifest)
+    pub fn parse_str(content: &str) -> Result<Self, TaskManifestError> {
+        content.parse()
     }
 
     /// Get the full version string (major.minor.patch)
@@ -141,7 +150,7 @@ impl TaskManifest {
 
     /// Check if this is a Node.js task
     pub fn is_node_task(&self) -> bool {
-        self.execution.as_ref().map_or(false, |e| {
+        self.execution.as_ref().is_some_and(|e| {
             e.node.is_some() || e.node10.is_some() || e.node16.is_some() || e.node20.is_some()
         })
     }
@@ -150,7 +159,7 @@ impl TaskManifest {
     pub fn is_powershell_task(&self) -> bool {
         self.execution
             .as_ref()
-            .map_or(false, |e| e.powershell.is_some() || e.powershell3.is_some())
+            .is_some_and(|e| e.powershell.is_some() || e.powershell3.is_some())
     }
 
     /// Get required input names

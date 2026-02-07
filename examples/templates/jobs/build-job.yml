@@ -1,0 +1,46 @@
+# Job Template: Build Job
+# Reusable build job with configurable pool, Rust version, and build options.
+
+parameters:
+  - name: vmImage
+    type: string
+    default: ubuntu-latest
+  - name: rustVersion
+    type: string
+    default: stable
+  - name: buildConfig
+    type: string
+    default: Debug
+  - name: runTests
+    type: boolean
+    default: true
+  - name: publishArtifacts
+    type: boolean
+    default: false
+  - name: artifactName
+    type: string
+    default: build-output
+
+jobs:
+  - job: Build
+    displayName: "Build (${{ parameters.buildConfig }} on ${{ parameters.vmImage }})"
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+      - checkout: self
+        fetchDepth: 1
+
+      - script: |
+          rustup default ${{ parameters.rustVersion }}
+          rustc --version
+        displayName: Configure Rust ${{ parameters.rustVersion }}
+
+      - template: ../steps/build.yml
+        parameters:
+          buildConfig: ${{ parameters.buildConfig }}
+          runTests: ${{ parameters.runTests }}
+
+      - ${{ if eq(parameters.publishArtifacts, true) }}:
+        - template: ../steps/publish.yml
+          parameters:
+            artifactName: ${{ parameters.artifactName }}

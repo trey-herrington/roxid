@@ -1,0 +1,57 @@
+# Simple Pipeline - Steps Only
+# Demonstrates the most basic Azure DevOps pipeline structure:
+# triggers, pool, variables, and inline script steps.
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - "*.md"
+      - docs/
+
+pr:
+  branches:
+    include:
+      - main
+  autoCancel: true
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  rustVersion: stable
+  CARGO_TERM_COLOR: always
+
+steps:
+  - checkout: self
+    clean: true
+    fetchDepth: 0
+    displayName: Checkout repository
+
+  - script: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $(rustVersion)
+      echo "##vso[task.setvariable variable=PATH]$HOME/.cargo/bin:$PATH"
+    displayName: Install Rust toolchain
+
+  - script: rustc --version && cargo --version
+    displayName: Display Rust version
+
+  - script: cargo fmt --check
+    displayName: Check formatting
+
+  - script: cargo clippy -- -D warnings
+    displayName: Run Clippy lints
+    continueOnError: true
+
+  - script: cargo build --workspace
+    displayName: Build workspace
+    timeoutInMinutes: 15
+
+  - script: cargo test --workspace
+    displayName: Run tests
+    env:
+      RUST_BACKTRACE: "1"
+      RUST_LOG: debug

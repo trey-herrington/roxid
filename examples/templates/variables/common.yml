@@ -1,0 +1,16 @@
+# Variable Template: Common Variables
+# Shared variables used across multiple pipelines.
+
+variables:
+  - name: buildConfig
+    value: Release
+  - name: rustVersion
+    value: stable
+  - name: CARGO_TERM_COLOR
+    value: always
+  - name: RUST_BACKTRACE
+    value: "1"
+  - name: registryUrl
+    value: roxid.azurecr.io
+  - name: imageName
+    value: roxid-app

@@ -373,6 +373,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn dfs_job_cycle(
         &self,
         stage: &StageNode,
@@ -413,13 +414,10 @@ impl ExecutionGraph {
         for stage in &self.stages {
             let name = stage.stage.stage.as_str();
             in_degree.entry(name).or_insert(0);
-            adj_list.entry(name).or_insert_with(Vec::new);
+            adj_list.entry(name).or_default();
 
             for dep in &stage.dependencies {
-                adj_list
-                    .entry(dep.as_str())
-                    .or_insert_with(Vec::new)
-                    .push(name);
+                adj_list.entry(dep.as_str()).or_default().push(name);
                 *in_degree.entry(name).or_insert(0) += 1;
             }
         }
@@ -467,13 +465,10 @@ impl ExecutionGraph {
         for job in &stage.jobs {
             let name = job.job.identifier().unwrap_or("unknown");
             in_degree.entry(name).or_insert(0);
-            adj_list.entry(name).or_insert_with(Vec::new);
+            adj_list.entry(name).or_default();
 
             for dep in &job.dependencies {
-                adj_list
-                    .entry(dep.as_str())
-                    .or_insert_with(Vec::new)
-                    .push(name);
+                adj_list.entry(dep.as_str()).or_default().push(name);
                 *in_degree.entry(name).or_insert(0) += 1;
             }
         }

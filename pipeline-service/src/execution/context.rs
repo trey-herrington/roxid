@@ -170,7 +170,7 @@ impl RuntimeContext {
     pub fn set_step_output(&mut self, step_name: String, output_name: String, value: Value) {
         self.step_outputs
             .entry(step_name)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(output_name, value);
     }
 
@@ -201,18 +201,14 @@ impl RuntimeContext {
 
     /// Build an ExpressionContext for evaluating conditions
     pub fn to_expression_context(&self) -> ExpressionContext {
-        let mut ctx = ExpressionContext::default();
-
-        // Variables
-        ctx.variables = self.variables.clone();
-
-        // Parameters
-        ctx.parameters = self.parameters.clone();
-
-        // Pipeline context
-        ctx.pipeline = PipelineContext {
-            name: Some(self.base.pipeline_name.clone()),
-            workspace: Some(self.base.working_dir.clone()),
+        let mut ctx = ExpressionContext {
+            variables: self.variables.clone(),
+            parameters: self.parameters.clone(),
+            pipeline: PipelineContext {
+                name: Some(self.base.pipeline_name.clone()),
+                workspace: Some(self.base.working_dir.clone()),
+            },
+            ..Default::default()
         };
 
         // Stage context
