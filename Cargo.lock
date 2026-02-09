@@ -694,7 +694,7 @@ checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
 name = "pipeline-service"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "dirs",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "roxid"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "roxid-tui"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = [
  "color-eyre",
  "crossterm 0.29.0",
