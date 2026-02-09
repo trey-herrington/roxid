@@ -36,7 +36,8 @@ pub fn render(app: &App, frame: &mut Frame) {
             si < app.tree_state.expanded_stages.len() && app.tree_state.expanded_stages[si];
 
         let arrow = if expanded { "v " } else { "> " };
-        let stage_name = stage.display_name.as_deref().unwrap_or(&stage.stage);
+        let default_name = stage.stage.clone().unwrap_or_default();
+        let stage_name = stage.display_name.as_deref().unwrap_or(&default_name);
         let jobs_info = format!(" ({} jobs)", stage.jobs.len());
 
         let style = if is_selected {

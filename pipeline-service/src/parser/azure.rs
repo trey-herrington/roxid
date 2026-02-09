@@ -132,15 +132,22 @@ impl PipelineValidator {
     }
 
     fn validate_stage_dependencies(stages: &[Stage], errors: &mut Vec<ValidationError>) {
-        let stage_names: Vec<&str> = stages.iter().map(|s| s.stage.as_str()).collect();
+        let stage_names: Vec<&str> = stages.iter().filter_map(|s| s.stage.as_deref()).collect();
 
         for stage in stages {
             for dep in stage.depends_on.as_vec() {
                 if !stage_names.contains(&dep.as_str()) {
                     errors.push(
                         ValidationError::new(
-                            format!("stage '{}' depends on unknown stage '{}'", stage.stage, dep),
-                            format!("stages.{}.dependsOn", stage.stage),
+                            format!(
+                                "stage '{}' depends on unknown stage '{}'",
+                                stage.stage.as_deref().unwrap_or("unknown"),
+                                dep
+                            ),
+                            format!(
+                                "stages.{}.dependsOn",
+                                stage.stage.as_deref().unwrap_or("unknown")
+                            ),
                         )
                         .with_suggestion(format!("available stages: {}", stage_names.join(", "))),
                     );
@@ -152,7 +159,7 @@ impl PipelineValidator {
         if let Err(cycle) = Self::detect_cycles(&stage_names, |name| {
             stages
                 .iter()
-                .find(|s| s.stage == name)
+                .find(|s| s.stage.as_deref() == Some(name))
                 .map(|s| s.depends_on.as_vec())
                 .unwrap_or_default()
         }) {
@@ -273,7 +280,7 @@ pub fn normalize_pipeline(mut pipeline: Pipeline) -> Pipeline {
             steps: std::mem::take(&mut pipeline.steps),
             timeout_in_minutes: None,
             cancel_timeout_in_minutes: None,
-            continue_on_error: false,
+            continue_on_error: BoolOrExpression::default(),
             workspace: None,
             uses: None,
             template: None,
@@ -285,7 +292,7 @@ pub fn normalize_pipeline(mut pipeline: Pipeline) -> Pipeline {
     // If pipeline has direct jobs (no stages), wrap in default stage
     if !pipeline.jobs.is_empty() && pipeline.stages.is_empty() {
         pipeline.stages = vec![Stage {
-            stage: "Build".to_string(),
+            stage: Some("Build".to_string()),
             display_name: None,
             depends_on: DependsOn::Default,
             condition: None,
@@ -375,8 +382,8 @@ stages:
 "#;
         let pipeline = AzureParser::parse(yaml).unwrap();
         assert_eq!(pipeline.stages.len(), 2);
-        assert_eq!(pipeline.stages[0].stage, "Build");
-        assert_eq!(pipeline.stages[1].stage, "Deploy");
+        assert_eq!(pipeline.stages[0].stage, Some("Build".to_string()));
+        assert_eq!(pipeline.stages[1].stage, Some("Deploy".to_string()));
     }
 
     #[test]

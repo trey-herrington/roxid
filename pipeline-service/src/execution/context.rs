@@ -105,7 +105,7 @@ impl RuntimeContext {
 
     /// Enter a stage (set current stage and merge variables)
     pub fn enter_stage(&mut self, stage: &Stage) {
-        self.current_stage = Some(stage.stage.clone());
+        self.current_stage = stage.stage.clone();
         self.current_job = None;
         self.step_results.clear();
         self.step_outputs.clear();
@@ -489,7 +489,7 @@ mod tests {
         let mut ctx = RuntimeContext::new(base);
 
         let stage = Stage {
-            stage: "Build".to_string(),
+            stage: Some("Build".to_string()),
             display_name: None,
             depends_on: Default::default(),
             condition: None,

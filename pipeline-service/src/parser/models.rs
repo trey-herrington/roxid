@@ -5,6 +5,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// A value that can be either a boolean literal or a runtime expression string.
+/// Azure DevOps allows fields like `continueOnError` to use runtime expressions
+/// such as `$[eq(variables.rustToolchain, 'nightly')]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BoolOrExpression {
+    Bool(bool),
+    Expression(String),
+}
+
+impl Default for BoolOrExpression {
+    fn default() -> Self {
+        BoolOrExpression::Bool(false)
+    }
+}
+
+impl BoolOrExpression {
+    /// Returns the boolean value if this is a literal bool, or false for expressions
+    /// (expressions must be evaluated at runtime).
+    pub fn as_bool(&self) -> bool {
+        match self {
+            BoolOrExpression::Bool(b) => *b,
+            BoolOrExpression::Expression(_) => false,
+        }
+    }
+}
+
 /// Root pipeline structure supporting all Azure DevOps formats
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -33,15 +60,15 @@ pub struct Pipeline {
     pub parameters: Vec<Parameter>,
 
     /// Full pipeline structure with stages
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub stages: Vec<Stage>,
 
     /// Shorthand: jobs without stages
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub jobs: Vec<Job>,
 
     /// Shorthand: steps without stages/jobs
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub steps: Vec<Step>,
 
     /// Default pool for all jobs
@@ -305,6 +332,47 @@ where
     deserializer.deserialize_any(VariablesVisitor)
 }
 
+/// Tolerant deserializer for Vec<T> that skips items which fail to deserialize.
+/// This handles Azure DevOps template expressions like `${{ if ... }}:` and
+/// `${{ each ... }}:` that appear as list items but cannot be deserialized into
+/// typed structs. These are compile-time template directives that should be
+/// preprocessed but may appear in raw YAML discovery.
+fn deserialize_tolerant_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    use serde::de::{SeqAccess, Visitor};
+
+    struct TolerantVecVisitor<T>(std::marker::PhantomData<T>);
+
+    impl<'de, T: serde::de::DeserializeOwned> Visitor<'de> for TolerantVecVisitor<T> {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a sequence")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut items = Vec::new();
+            // Try to deserialize each element; use serde_yaml::Value as a fallback
+            // to consume items that fail typed deserialization (e.g., template directives)
+            while let Some(value) = seq.next_element::<serde_yaml::Value>()? {
+                if let Ok(item) = serde_yaml::from_value::<T>(value) {
+                    items.push(item);
+                }
+                // Silently skip items that fail to deserialize (template directives, etc.)
+            }
+            Ok(items)
+        }
+    }
+
+    deserializer.deserialize_seq(TolerantVecVisitor::<T>(std::marker::PhantomData))
+}
+
 // =============================================================================
 // Parameters
 // =============================================================================
@@ -372,7 +440,7 @@ pub enum PoolDemands {
 #[serde(rename_all = "camelCase")]
 pub struct Stage {
     /// Stage identifier
-    pub stage: String,
+    pub stage: Option<String>,
 
     /// Display name in UI
     pub display_name: Option<String>,
@@ -389,7 +457,7 @@ pub struct Stage {
     pub variables: Vec<Variable>,
 
     /// Jobs in this stage
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub jobs: Vec<Job>,
 
     /// Lock behavior
@@ -447,7 +515,7 @@ pub struct Job {
     pub variables: Vec<Variable>,
 
     /// Steps to execute
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub steps: Vec<Step>,
 
     /// Job timeout
@@ -458,7 +526,7 @@ pub struct Job {
 
     /// Continue pipeline on error
     #[serde(default)]
-    pub continue_on_error: bool,
+    pub continue_on_error: BoolOrExpression,
 
     /// Workspace settings
     pub workspace: Option<Workspace>,
@@ -551,7 +619,7 @@ pub struct EnvironmentSpec {
     pub resource_name: Option<String>,
     pub resource_id: Option<u64>,
     pub resource_type: Option<String>,
-    pub tags: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 // =============================================================================
@@ -599,6 +667,7 @@ pub struct DeploymentHooks {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSteps {
     pub pool: Option<Pool>,
+    #[serde(default, deserialize_with = "deserialize_tolerant_vec")]
     pub steps: Vec<Step>,
 }
 
@@ -669,7 +738,7 @@ pub struct Step {
 
     /// Continue job on step failure
     #[serde(default)]
-    pub continue_on_error: bool,
+    pub continue_on_error: BoolOrExpression,
 
     /// Enable/disable step
     #[serde(default = "default_true")]
@@ -853,7 +922,6 @@ pub enum DownloadNone {
 pub struct PublishStep {
     pub publish: String,
     pub artifact: Option<String>,
-    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

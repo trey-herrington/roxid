@@ -992,7 +992,9 @@ impl TemplateEngine {
     ) -> ParseResult<Stage> {
         let mut new_stage = stage.clone();
 
-        new_stage.stage = self.substitute_compile_time(&stage.stage, engine)?;
+        if let Some(stage_name) = &stage.stage {
+            new_stage.stage = Some(self.substitute_compile_time(stage_name, engine)?);
+        }
 
         if let Some(display_name) = &stage.display_name {
             new_stage.display_name = Some(self.substitute_compile_time(display_name, engine)?);
@@ -1761,7 +1763,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -1816,7 +1818,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -1903,7 +1905,7 @@ stages:
 
         let pipeline = Pipeline {
             stages: vec![Stage {
-                stage: "placeholder".to_string(),
+                stage: Some("placeholder".to_string()),
                 template: Some("stages/deploy.yml".to_string()),
                 parameters: {
                     let mut params = HashMap::new();
@@ -1957,7 +1959,7 @@ variables:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2013,7 +2015,7 @@ stages:
 
         let resolved = engine.resolve_pipeline(pipeline).unwrap();
         assert_eq!(resolved.stages.len(), 1);
-        assert_eq!(resolved.stages[0].stage, "Build");
+        assert_eq!(resolved.stages[0].stage, Some("Build".to_string()));
         let build_step = &resolved.stages[0].jobs[0].steps[0];
         if let StepAction::Script(script) = &build_step.action {
             assert_eq!(script.script, "echo Building Release");
@@ -2048,7 +2050,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2092,7 +2094,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2125,7 +2127,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2181,7 +2183,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2244,7 +2246,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2335,7 +2337,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2385,7 +2387,7 @@ steps:
                     name: None,
                     display_name: None,
                     condition: None,
-                    continue_on_error: false,
+                    continue_on_error: BoolOrExpression::default(),
                     enabled: true,
                     timeout_in_minutes: None,
                     retry_count_on_task_failure: None,
@@ -2399,7 +2401,7 @@ steps:
                     name: None,
                     display_name: None,
                     condition: None,
-                    continue_on_error: false,
+                    continue_on_error: BoolOrExpression::default(),
                     enabled: true,
                     timeout_in_minutes: None,
                     retry_count_on_task_failure: None,
@@ -2499,7 +2501,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2552,7 +2554,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2603,7 +2605,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2657,7 +2659,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2714,7 +2716,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2774,7 +2776,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2838,7 +2840,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2896,7 +2898,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -2958,7 +2960,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -3133,7 +3135,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -3189,7 +3191,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -3245,7 +3247,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -3304,7 +3306,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -3360,7 +3362,7 @@ steps:
                 name: None,
                 display_name: None,
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
