@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::Result;
 
+use pipeline_service::utils::find_repo_root;
 use pipeline_service::{ReportFormat, TestFileParser, TestReporter, TestRunner};
 
 /// Run pipeline tests
@@ -39,9 +40,16 @@ pub async fn execute(args: TestArgs) -> Result<()> {
     // Build the test runner
     let mut runner = TestRunner::new();
 
-    if let Some(dir) = &args.working_dir {
-        runner = runner.with_working_dir(dir.to_string_lossy().to_string());
-    }
+    // Resolve working directory: explicit flag > repo root > cwd
+    let resolved_dir = match &args.working_dir {
+        Some(dir) => dir.clone(),
+        None => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            find_repo_root(&cwd).unwrap_or(cwd)
+        }
+    };
+
+    runner = runner.with_working_dir(resolved_dir.to_string_lossy().to_string());
 
     if let Some(filter) = &args.filter {
         runner = runner.with_filter(filter.clone());
@@ -56,11 +64,7 @@ pub async fn execute(args: TestArgs) -> Result<()> {
         }
         vec![file.clone()]
     } else {
-        let current_dir = args
-            .working_dir
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        TestFileParser::discover(&current_dir)
+        TestFileParser::discover(&resolved_dir)
     };
 
     if test_files.is_empty() {

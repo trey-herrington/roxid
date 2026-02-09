@@ -12,6 +12,7 @@ use pipeline_service::execution::events::{progress_channel, ProgressReceiver};
 use pipeline_service::parser::models::{
     ExecutionContext, JobStatus, StageStatus, StepStatus, Variable,
 };
+use pipeline_service::utils::resolve_working_dir;
 use pipeline_service::{
     normalize_pipeline, AzureParser, ExecutionEvent, ExecutionResult, Pipeline, PipelineExecutor,
     TestFileParser, TestRunner, TestSuiteResult,
@@ -727,10 +728,7 @@ impl App {
         let pipeline_name = pipeline_info.name.clone();
 
         // Build execution context with variable overrides
-        let working_dir = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .to_string_lossy()
-            .to_string();
+        let working_dir = resolve_working_dir().to_string_lossy().to_string();
 
         let mut variables = HashMap::new();
         if let Some(editor) = &self.variable_editor {
@@ -1275,7 +1273,7 @@ impl App {
     }
 
     async fn run_tests(&mut self) {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let current_dir = resolve_working_dir();
         let test_files = TestFileParser::discover(&current_dir);
 
         if test_files.is_empty() {
