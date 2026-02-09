@@ -8,6 +8,7 @@ pub mod parser;
 pub mod runners;
 pub mod tasks;
 pub mod testing;
+pub mod utils;
 pub mod workflow;
 
 // Re-export commonly used types
@@ -39,3 +40,6 @@ pub use testing::{
     Assertion, AssertionResult, ReportFormat, TestFileParser, TestReporter, TestResult, TestRunner,
     TestSuiteResult,
 };
+
+// Re-export utility types
+pub use utils::{find_repo_root, resolve_working_dir};

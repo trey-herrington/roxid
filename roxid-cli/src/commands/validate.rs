@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::Result;
 
+use pipeline_service::utils::find_repo_root;
 use pipeline_service::{normalize_pipeline, AzureParser, PipelineValidator, TemplateEngine};
 
 /// Validate a pipeline YAML file
@@ -78,10 +79,10 @@ pub fn execute(args: ValidateArgs) -> Result<()> {
 
     // Step 4: Template validation (optional)
     if args.templates {
-        let repo_root = args
-            .repo_root
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let repo_root = args.repo_root.clone().unwrap_or_else(|| {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            find_repo_root(&cwd).unwrap_or(cwd)
+        });
 
         output::status("Resolving", "templates...");
 

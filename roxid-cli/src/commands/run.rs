@@ -8,6 +8,7 @@ use color_eyre::Result;
 
 use pipeline_service::execution::events::progress_channel;
 use pipeline_service::parser::models::{ExecutionContext, JobStatus, StageStatus, StepStatus};
+use pipeline_service::utils::find_repo_root;
 use pipeline_service::{normalize_pipeline, AzureParser, ExecutionEvent, PipelineExecutor};
 
 /// Run an Azure DevOps pipeline locally
@@ -57,7 +58,10 @@ pub async fn execute(args: RunArgs) -> Result<()> {
     // Resolve working directory
     let working_dir = match &args.working_dir {
         Some(dir) => dir.clone(),
-        None => std::env::current_dir()?,
+        None => {
+            let cwd = std::env::current_dir()?;
+            find_repo_root(&cwd).unwrap_or(cwd)
+        }
     };
 
     // Parse the pipeline
