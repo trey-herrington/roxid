@@ -1,7 +1,7 @@
 // Execution Graph (DAG) Builder
 // Builds a directed acyclic graph from pipeline definition for execution ordering
 
-use crate::parser::models::{DependsOn, Job, Pipeline, Stage};
+use crate::parser::models::{BoolOrExpression, DependsOn, Job, Pipeline, Stage};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -98,7 +98,7 @@ impl ExecutionGraph {
         let mut stage_indices = HashMap::new();
 
         for (i, stage) in stages.iter().enumerate() {
-            let stage_name = stage.stage.clone();
+            let stage_name = stage.stage.clone().unwrap_or_default();
             stage_indices.insert(stage_name.clone(), i);
 
             // Calculate stage dependencies
@@ -141,7 +141,7 @@ impl ExecutionGraph {
         // If we have jobs but no stages, create a single stage
         if !pipeline.jobs.is_empty() {
             return Ok(vec![Stage {
-                stage: "__default".to_string(),
+                stage: Some("__default".to_string()),
                 display_name: None,
                 depends_on: DependsOn::None,
                 condition: None,
@@ -170,7 +170,7 @@ impl ExecutionGraph {
                 steps: pipeline.steps.clone(),
                 timeout_in_minutes: None,
                 cancel_timeout_in_minutes: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 workspace: None,
                 uses: None,
                 template: None,
@@ -179,7 +179,7 @@ impl ExecutionGraph {
             };
 
             return Ok(vec![Stage {
-                stage: "__default".to_string(),
+                stage: Some("__default".to_string()),
                 display_name: None,
                 depends_on: DependsOn::None,
                 condition: None,
@@ -206,7 +206,7 @@ impl ExecutionGraph {
             DependsOn::Default => {
                 // Default: depends on the previous stage (if any)
                 if index > 0 {
-                    vec![all_stages[index - 1].stage.clone()]
+                    vec![all_stages[index - 1].stage.clone().unwrap_or_default()]
                 } else {
                     vec![]
                 }
@@ -277,14 +277,19 @@ impl ExecutionGraph {
     /// Validate the execution graph (check for cycles and unknown dependencies)
     pub fn validate(&self) -> Result<(), GraphError> {
         // Validate stage dependencies exist
-        let stage_names: HashSet<_> = self.stages.iter().map(|s| s.stage.stage.as_str()).collect();
+        let stage_names: HashSet<_> = self
+            .stages
+            .iter()
+            .map(|s| s.stage.stage.as_deref().unwrap_or(""))
+            .collect();
 
         for stage_node in &self.stages {
             for dep in &stage_node.dependencies {
                 if !stage_names.contains(dep.as_str()) {
                     return Err(GraphError::unknown_dependency(format!(
                         "stage '{}' depends on unknown stage '{}'",
-                        stage_node.stage.stage, dep
+                        stage_node.stage.stage.as_deref().unwrap_or("unknown"),
+                        dep
                     )));
                 }
             }
@@ -307,7 +312,7 @@ impl ExecutionGraph {
         let mut rec_stack = HashSet::new();
 
         for stage_node in &self.stages {
-            if !visited.contains(&stage_node.stage.stage) {
+            if !visited.contains(stage_node.stage.stage.as_deref().unwrap_or("")) {
                 if let Some(cycle) = self.dfs_stage_cycle(stage_node, &mut visited, &mut rec_stack)
                 {
                     return Err(GraphError::cyclic(format!(
@@ -327,7 +332,7 @@ impl ExecutionGraph {
         visited: &mut HashSet<String>,
         rec_stack: &mut HashSet<String>,
     ) -> Option<Vec<String>> {
-        let name = &node.stage.stage;
+        let name = node.stage.stage.clone().unwrap_or_default();
         visited.insert(name.clone());
         rec_stack.insert(name.clone());
 
@@ -346,7 +351,7 @@ impl ExecutionGraph {
             }
         }
 
-        rec_stack.remove(name);
+        rec_stack.remove(&name);
         None
     }
 
@@ -363,7 +368,7 @@ impl ExecutionGraph {
                 {
                     return Err(GraphError::cyclic(format!(
                         "circular dependency detected in jobs of stage '{}': {}",
-                        stage.stage.stage,
+                        stage.stage.stage.as_deref().unwrap_or("unknown"),
                         cycle.join(" -> ")
                     )));
                 }
@@ -412,7 +417,7 @@ impl ExecutionGraph {
 
         // Initialize
         for stage in &self.stages {
-            let name = stage.stage.stage.as_str();
+            let name = stage.stage.stage.as_deref().unwrap_or("");
             in_degree.entry(name).or_insert(0);
             adj_list.entry(name).or_default();
 
@@ -508,7 +513,7 @@ impl ExecutionGraph {
         let mut assigned: HashMap<&str, usize> = HashMap::new();
 
         for stage in self.topological_order() {
-            let name = stage.stage.stage.as_str();
+            let name = stage.stage.stage.as_deref().unwrap_or("");
             let level = if stage.dependencies.is_empty() {
                 0
             } else {
@@ -582,7 +587,7 @@ mod tests {
 
     fn make_stage(name: &str, depends_on: DependsOn) -> Stage {
         Stage {
-            stage: name.to_string(),
+            stage: Some(name.to_string()),
             display_name: None,
             depends_on,
             condition: None,
@@ -610,7 +615,7 @@ mod tests {
             steps: Vec::new(),
             timeout_in_minutes: None,
             cancel_timeout_in_minutes: None,
-            continue_on_error: false,
+            continue_on_error: BoolOrExpression::default(),
             workspace: None,
             uses: None,
             template: None,
@@ -637,9 +642,9 @@ mod tests {
         // Topological order should be Build -> Test -> Deploy
         let order: Vec<_> = graph.topological_order();
         assert_eq!(order.len(), 3);
-        assert_eq!(order[0].stage.stage, "Build");
-        assert_eq!(order[1].stage.stage, "Test");
-        assert_eq!(order[2].stage.stage, "Deploy");
+        assert_eq!(order[0].stage.stage, Some("Build".to_string()));
+        assert_eq!(order[1].stage.stage, Some("Test".to_string()));
+        assert_eq!(order[2].stage.stage, Some("Deploy".to_string()));
     }
 
     #[test]
@@ -661,14 +666,14 @@ mod tests {
 
         // Level 0: Build
         assert_eq!(parallel[0].len(), 1);
-        assert_eq!(parallel[0][0].stage.stage, "Build");
+        assert_eq!(parallel[0][0].stage.stage, Some("Build".to_string()));
 
         // Level 1: UnitTest, IntegrationTest (can run in parallel)
         assert_eq!(parallel[1].len(), 2);
 
         // Level 2: Deploy
         assert_eq!(parallel[2].len(), 1);
-        assert_eq!(parallel[2][0].stage.stage, "Deploy");
+        assert_eq!(parallel[2][0].stage.stage, Some("Deploy".to_string()));
     }
 
     #[test]
@@ -750,7 +755,7 @@ mod tests {
                 name: Some("echo".to_string()),
                 display_name: Some("Echo Hello".to_string()),
                 condition: None,
-                continue_on_error: false,
+                continue_on_error: BoolOrExpression::default(),
                 enabled: true,
                 timeout_in_minutes: None,
                 retry_count_on_task_failure: None,
@@ -767,7 +772,7 @@ mod tests {
         let graph = ExecutionGraph::from_pipeline(&pipeline).unwrap();
 
         assert_eq!(graph.stages.len(), 1);
-        assert_eq!(graph.stages[0].stage.stage, "__default");
+        assert_eq!(graph.stages[0].stage.stage, Some("__default".to_string()));
         assert_eq!(graph.stages[0].jobs.len(), 1);
         assert_eq!(graph.stages[0].jobs[0].job.steps.len(), 1);
     }
@@ -785,7 +790,7 @@ mod tests {
         let graph = ExecutionGraph::from_pipeline(&pipeline).unwrap();
 
         assert_eq!(graph.stages.len(), 1);
-        assert_eq!(graph.stages[0].stage.stage, "__default");
+        assert_eq!(graph.stages[0].stage.stage, Some("__default".to_string()));
         assert_eq!(graph.stages[0].jobs.len(), 2);
     }
 

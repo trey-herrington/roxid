@@ -223,7 +223,7 @@ impl PipelineExecutor {
     ) -> StageResult {
         let start = Instant::now();
         let stage = &stage_node.stage;
-        let stage_name = &stage.stage;
+        let stage_name = stage.stage.clone().unwrap_or_default();
 
         // Check dependencies
         if !stage_node.dependencies.is_empty()
@@ -283,7 +283,7 @@ impl PipelineExecutor {
         runtime.enter_stage(stage);
 
         self.event_tx.send_event(ExecutionEvent::stage_started(
-            stage_name,
+            &stage_name,
             stage.display_name.clone(),
             stage_node.jobs.len(),
         ));
@@ -298,7 +298,7 @@ impl PipelineExecutor {
         for job_level in parallel_jobs {
             // Execute jobs at this level
             let level_results = self
-                .execute_job_level(&job_level, stage_name, runtime)
+                .execute_job_level(&job_level, &stage_name, runtime)
                 .await;
 
             for result in level_results {
@@ -331,7 +331,7 @@ impl PipelineExecutor {
         runtime.exit_stage(result.clone());
 
         self.event_tx.send_event(ExecutionEvent::stage_completed(
-            stage_name,
+            &stage_name,
             stage_status,
             duration,
         ));
@@ -481,7 +481,7 @@ impl PipelineExecutor {
 
             if instance_result.status == JobStatus::Failed {
                 overall_status = JobStatus::Failed;
-                if !job.continue_on_error {
+                if !job.continue_on_error.as_bool() {
                     break;
                 }
             } else if instance_result.status == JobStatus::SucceededWithIssues
@@ -556,7 +556,7 @@ impl PipelineExecutor {
 
             match result.status {
                 StepStatus::Failed => {
-                    if !step.continue_on_error {
+                    if !step.continue_on_error.as_bool() {
                         should_run = false;
                         job_status = JobStatus::Failed;
                     } else {
@@ -1243,13 +1243,13 @@ fn parse_logging_commands(output: &str, runtime: &mut RuntimeContext) -> HashMap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::models::{DependsOn, Job, ScriptStep, Stage, Step};
+    use crate::parser::models::{BoolOrExpression, DependsOn, Job, ScriptStep, Stage, Step};
 
     fn make_simple_pipeline() -> Pipeline {
         Pipeline {
             name: Some("test-pipeline".to_string()),
             stages: vec![Stage {
-                stage: "Build".to_string(),
+                stage: Some("Build".to_string()),
                 display_name: None,
                 depends_on: DependsOn::None,
                 condition: None,
@@ -1269,7 +1269,7 @@ mod tests {
                         name: Some("echo".to_string()),
                         display_name: Some("Echo Hello".to_string()),
                         condition: None,
-                        continue_on_error: false,
+                        continue_on_error: BoolOrExpression::default(),
                         enabled: true,
                         timeout_in_minutes: None,
                         retry_count_on_task_failure: None,
@@ -1282,7 +1282,7 @@ mod tests {
                     }],
                     timeout_in_minutes: None,
                     cancel_timeout_in_minutes: None,
-                    continue_on_error: false,
+                    continue_on_error: BoolOrExpression::default(),
                     workspace: None,
                     uses: None,
                     template: None,
@@ -1353,7 +1353,7 @@ World
             name: None,
             display_name: None,
             condition: Some("always()".to_string()),
-            continue_on_error: false,
+            continue_on_error: BoolOrExpression::default(),
             enabled: true,
             timeout_in_minutes: None,
             retry_count_on_task_failure: None,
@@ -1369,7 +1369,7 @@ World
             name: None,
             display_name: None,
             condition: Some("succeeded()".to_string()),
-            continue_on_error: false,
+            continue_on_error: BoolOrExpression::default(),
             enabled: true,
             timeout_in_minutes: None,
             retry_count_on_task_failure: None,

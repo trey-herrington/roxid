@@ -160,7 +160,7 @@ impl ContainerRunner {
 
             step_results.push(result);
 
-            if job_status == JobStatus::Failed && !job.continue_on_error {
+            if job_status == JobStatus::Failed && !job.continue_on_error.as_bool() {
                 break;
             }
         }

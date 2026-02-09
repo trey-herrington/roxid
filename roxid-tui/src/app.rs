@@ -760,7 +760,7 @@ impl App {
             .stages
             .iter()
             .map(|s| StageProgress {
-                name: s.stage.clone(),
+                name: s.stage.clone().unwrap_or_default(),
                 display_name: s.display_name.clone(),
                 status: StageStatus::Pending,
                 jobs: s
