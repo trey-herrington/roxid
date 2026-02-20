@@ -1,7 +1,7 @@
 // Execution Graph (DAG) Builder
 // Builds a directed acyclic graph from pipeline definition for execution ordering
 
-use crate::parser::models::{BoolOrExpression, DependsOn, Job, Pipeline, Stage};
+use crate::parser::models::{BoolOrExpression, DependsOn, Job, Pipeline, Stage, Variable};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -61,6 +61,8 @@ pub struct ExecutionGraph {
     pub stages: Vec<StageNode>,
     /// Quick lookup of stage index by name
     stage_indices: HashMap<String, usize>,
+    /// Pipeline-level variables
+    pub variables: Vec<Variable>,
 }
 
 /// A node representing a stage in the execution graph
@@ -123,6 +125,7 @@ impl ExecutionGraph {
         let graph = Self {
             stages: stage_nodes,
             stage_indices,
+            variables: pipeline.variables.clone(),
         };
 
         // Validate the graph
@@ -151,6 +154,7 @@ impl ExecutionGraph {
                 template: None,
                 parameters: HashMap::new(),
                 pool: pipeline.pool.clone(),
+                has_template_directives: false,
             }]);
         }
 
@@ -176,6 +180,7 @@ impl ExecutionGraph {
                 template: None,
                 parameters: HashMap::new(),
                 environment: None,
+                has_template_directives: false,
             };
 
             return Ok(vec![Stage {
@@ -189,6 +194,7 @@ impl ExecutionGraph {
                 template: None,
                 parameters: HashMap::new(),
                 pool: pipeline.pool.clone(),
+                has_template_directives: false,
             }]);
         }
 
@@ -597,6 +603,7 @@ mod tests {
             template: None,
             parameters: HashMap::new(),
             pool: None,
+            has_template_directives: false,
         }
     }
 
@@ -621,6 +628,7 @@ mod tests {
             template: None,
             parameters: HashMap::new(),
             environment: None,
+            has_template_directives: false,
         }
     }
 

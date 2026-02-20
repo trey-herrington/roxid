@@ -275,9 +275,10 @@ impl TestRunner {
             }
         }
 
-        let total = results.len();
+        let total = tests.len();
         let passed = results.iter().filter(|r| r.passed).count();
         let failed = results.iter().filter(|r| !r.passed).count();
+        let skipped = total - results.len();
 
         TestSuiteResult {
             suite_name,
@@ -285,7 +286,7 @@ impl TestRunner {
             total,
             passed,
             failed,
-            skipped: tests.len() - total,
+            skipped,
             duration: start.elapsed(),
         }
     }

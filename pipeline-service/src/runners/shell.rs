@@ -202,8 +202,30 @@ impl ShellRunner {
             }
         };
 
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
+        let stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                return ShellOutput {
+                    stdout: String::new(),
+                    stderr: "Internal error: stdout was not piped".to_string(),
+                    exit_code: None,
+                    outputs: HashMap::new(),
+                    variables: HashMap::new(),
+                };
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(s) => s,
+            None => {
+                return ShellOutput {
+                    stdout: String::new(),
+                    stderr: "Internal error: stderr was not piped".to_string(),
+                    exit_code: None,
+                    outputs: HashMap::new(),
+                    variables: HashMap::new(),
+                };
+            }
+        };
 
         // Read output streams concurrently
         let stdout_reader = BufReader::new(stdout);
@@ -328,8 +350,30 @@ impl ShellRunner {
             }
         };
 
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
+        let stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                return ShellOutput {
+                    stdout: String::new(),
+                    stderr: "Internal error: stdout was not piped".to_string(),
+                    exit_code: None,
+                    outputs: HashMap::new(),
+                    variables: HashMap::new(),
+                };
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(s) => s,
+            None => {
+                return ShellOutput {
+                    stdout: String::new(),
+                    stderr: "Internal error: stderr was not piped".to_string(),
+                    exit_code: None,
+                    outputs: HashMap::new(),
+                    variables: HashMap::new(),
+                };
+            }
+        };
 
         let stdout_reader = BufReader::new(stdout);
         let stderr_reader = BufReader::new(stderr);
@@ -456,9 +500,9 @@ fn parse_logging_commands(output: &str) -> (HashMap<String, String>, HashMap<Str
                     let prop = prop.trim();
                     if let Some(name) = prop.strip_prefix("variable=") {
                         var_name = Some(name.to_string());
-                    } else if prop == "isoutput=true" || prop == "isOutput=true" {
+                    } else if prop.eq_ignore_ascii_case("isoutput=true") {
                         is_output = true;
-                    } else if prop == "issecret=true" || prop == "isSecret=true" {
+                    } else if prop.eq_ignore_ascii_case("issecret=true") {
                         is_secret = true;
                     }
                 }
@@ -484,9 +528,9 @@ fn parse_logging_commands(output: &str) -> (HashMap<String, String>, HashMap<Str
                     let prop = prop.trim();
                     if let Some(name) = prop.strip_prefix("variable=") {
                         var_name = Some(name.to_string());
-                    } else if prop == "isoutput=true" || prop == "isOutput=true" {
+                    } else if prop.eq_ignore_ascii_case("isoutput=true") {
                         is_output = true;
-                    } else if prop == "issecret=true" || prop == "isSecret=true" {
+                    } else if prop.eq_ignore_ascii_case("issecret=true") {
                         is_secret = true;
                     }
                 }

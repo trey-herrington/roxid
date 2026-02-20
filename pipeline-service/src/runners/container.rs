@@ -524,17 +524,46 @@ impl ContainerRunner {
     /// Stop and remove a container
     async fn stop_container(&self, handle: &ContainerHandle) -> Result<(), ContainerError> {
         // Stop the container
-        let _ = tokio::process::Command::new("docker")
+        let stop_result = tokio::process::Command::new("docker")
             .args(["stop", &handle.name])
             .output()
             .await;
 
+        if let Err(e) = &stop_result {
+            eprintln!("Warning: failed to stop container '{}': {}", handle.name, e);
+        } else if let Ok(output) = &stop_result {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!(
+                    "Warning: docker stop '{}' failed: {}",
+                    handle.name,
+                    stderr.trim()
+                );
+            }
+        }
+
         // Remove the container if auto_remove is enabled
         if self.config.auto_remove {
-            let _ = tokio::process::Command::new("docker")
+            let rm_result = tokio::process::Command::new("docker")
                 .args(["rm", "-f", &handle.name])
                 .output()
                 .await;
+
+            if let Err(e) = &rm_result {
+                eprintln!(
+                    "Warning: failed to remove container '{}': {}",
+                    handle.name, e
+                );
+            } else if let Ok(output) = &rm_result {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!(
+                        "Warning: docker rm '{}' failed: {}",
+                        handle.name,
+                        stderr.trim()
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -547,14 +576,24 @@ impl Default for ContainerRunner {
     }
 }
 
-/// Generate a simple UUID-like string (8 chars)
+/// Generate a simple unique identifier string (16 hex chars)
+///
+/// Uses nanosecond timestamp XORed with the process ID, plus an atomic counter
+/// to ensure uniqueness even for rapid successive calls.
 fn uuid_v4_simple() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let nanos = duration.as_nanos();
-    format!("{:08x}", (nanos as u32) ^ std::process::id())
+    let nanos = duration.as_nanos() as u64;
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id() as u64;
+    let hash = nanos ^ (pid << 32) ^ count.wrapping_mul(0x9e3779b97f4a7c15);
+    format!("{:016x}", hash)
 }
 
 #[cfg(test)]
@@ -600,9 +639,11 @@ mod tests {
         let id1 = uuid_v4_simple();
         let id2 = uuid_v4_simple();
 
-        assert_eq!(id1.len(), 8);
-        // IDs generated in quick succession might be the same,
-        // but they should be valid hex strings
+        assert_eq!(id1.len(), 16);
+        assert_eq!(id2.len(), 16);
+        // IDs generated in quick succession should now be unique
+        // thanks to the atomic counter
+        assert_ne!(id1, id2);
         assert!(id1.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(id2.chars().all(|c| c.is_ascii_hexdigit()));
     }

@@ -30,7 +30,7 @@ tests:
     variables:
       buildConfiguration: Release
     assertions:
-      - step_succeeded: "Compile Roxid"
+      - step_succeeded: "Build workspace"
       - step_ran_before:
           step: "Build workspace"
           before: "Prepare artifact"

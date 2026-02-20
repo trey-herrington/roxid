@@ -1,0 +1,106 @@
+# Edge case test pipeline for roxid verification
+# Tests variable substitution, displayName resolution, conditions, and more
+
+trigger:
+  - main
+
+variables:
+  myVar: hello-world
+  buildNumber: "42"
+
+stages:
+  - stage: VariableTests
+    displayName: Variable Substitution Tests
+    jobs:
+      - job: MacroSubstitution
+        displayName: "Test macro $(myVar) in displayName"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          # Test basic macro substitution in scripts
+          - script: echo "myVar is $(myVar)"
+            displayName: Basic macro substitution
+
+          # Test undefined variable behavior
+          - script: echo "undefined is [$(undefinedVar)]"
+            displayName: Undefined variable substitution
+
+          # Test multiple macros in one script
+          - script: echo "Build $(buildNumber) with $(myVar)"
+            displayName: Multiple macros
+
+          # Test env section with variable macros
+          - script: echo "ENV_VAR=$MY_ENV"
+            displayName: Env with macro
+            env:
+              MY_ENV: $(myVar)
+
+  - stage: ConditionTests
+    displayName: Condition Evaluation
+    dependsOn: VariableTests
+    jobs:
+      - job: AlwaysRun
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: echo "This always runs"
+            displayName: Always step
+            condition: always()
+
+          - script: echo "This should run if previous succeeded"
+            displayName: Succeeded step
+            condition: succeeded()
+
+          # Test condition with undefined variable
+          - script: echo "This checks a variable condition"
+            displayName: Variable condition
+            condition: eq(variables.myVar, 'hello-world')
+
+  - stage: OutputVariableTests
+    displayName: Output Variable Tests
+    dependsOn: VariableTests
+    jobs:
+      - job: ProduceOutput
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: echo "##vso[task.setvariable variable=myOutput;isoutput=true]some-value"
+            name: producer
+            displayName: Set output variable
+
+          - script: echo "Output was set"
+            displayName: After output set
+
+      - job: ConsumeOutput
+        dependsOn: ProduceOutput
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          # Cross-job output variable reference
+          - script: 'echo "Got output: $(ProduceOutput.producer.myOutput)"'
+            displayName: "Read cross-job output"
+
+  - stage: ErrorHandling
+    displayName: Error Handling
+    dependsOn: VariableTests
+    jobs:
+      - job: ContinueOnError
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: exit 1
+            displayName: Failing step (continue)
+            continueOnError: true
+
+          - script: echo "This should still run"
+            displayName: Step after continue-on-error
+
+      - job: FailingJob
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: exit 1
+            displayName: Failing step
+
+          - script: echo "This should be skipped"
+            displayName: Step after failure

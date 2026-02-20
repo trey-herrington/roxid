@@ -80,6 +80,11 @@ pub struct Pipeline {
     /// Lock behavior for resources
     #[serde(rename = "lockBehavior")]
     pub lock_behavior: Option<LockBehavior>,
+
+    /// Whether stages/jobs/steps lists contained compile-time template directives
+    /// (${{ if }}, ${{ each }}) that were dropped during deserialization.
+    #[serde(skip)]
+    pub has_template_directives: bool,
 }
 
 // =============================================================================
@@ -361,16 +366,36 @@ where
             // Try to deserialize each element; use serde_yaml::Value as a fallback
             // to consume items that fail typed deserialization (e.g., template directives)
             while let Some(value) = seq.next_element::<serde_yaml::Value>()? {
+                // Skip compile-time template directives (${{ if }}, ${{ each }}, etc.)
+                // These appear as mappings with a ${{ ... }} key and must not be
+                // deserialized into typed structs (which would create phantom entries
+                // with empty/default fields).
+                if is_template_directive(&value) {
+                    continue;
+                }
                 if let Ok(item) = serde_yaml::from_value::<T>(value) {
                     items.push(item);
                 }
-                // Silently skip items that fail to deserialize (template directives, etc.)
+                // Silently skip items that fail to deserialize
             }
             Ok(items)
         }
     }
 
     deserializer.deserialize_seq(TolerantVecVisitor::<T>(std::marker::PhantomData))
+}
+
+/// Check whether a YAML value is a compile-time template directive.
+/// Template directives appear as mappings with a key that starts with `${{`.
+pub fn is_template_directive(value: &serde_yaml::Value) -> bool {
+    if let Some(mapping) = value.as_mapping() {
+        mapping.keys().any(|key| {
+            key.as_str()
+                .is_some_and(|s| s.trim_start().starts_with("${{"))
+        })
+    } else {
+        false
+    }
 }
 
 // =============================================================================
@@ -472,6 +497,12 @@ pub struct Stage {
 
     /// Pool override for all jobs
     pub pool: Option<Pool>,
+
+    /// Whether the jobs list contained compile-time template directives
+    /// (${{ if }}, ${{ each }}) that were dropped during deserialization.
+    /// When true, the validator should not require jobs to be non-empty.
+    #[serde(skip)]
+    pub has_template_directives: bool,
 }
 
 // =============================================================================
@@ -543,6 +574,12 @@ pub struct Job {
 
     /// Deployment environment (for deployment jobs)
     pub environment: Option<Environment>,
+
+    /// Whether the steps list contained compile-time template directives
+    /// (${{ if }}, ${{ each }}) that were dropped during deserialization.
+    /// When true, the validator should not require steps to be non-empty.
+    #[serde(skip)]
+    pub has_template_directives: bool,
 }
 
 impl Job {
