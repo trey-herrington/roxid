@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "roxid"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "roxid-tui"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "color-eyre",
  "crossterm 0.29.0",
