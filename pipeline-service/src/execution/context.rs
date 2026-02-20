@@ -184,8 +184,52 @@ impl RuntimeContext {
         for var in variables {
             match var {
                 Variable::KeyValue { name, value, .. } => {
-                    self.variables
-                        .insert(name.clone(), Value::String(value.clone()));
+                    let trimmed = value.trim();
+                    if trimmed.starts_with("$[") && trimmed.ends_with(']') {
+                        // Runtime expression ($[...]): evaluate the inner expression
+                        let inner = &trimmed[2..trimmed.len() - 1];
+                        let engine = self.expression_engine();
+                        match engine.evaluate_runtime(inner) {
+                            Ok(result) => {
+                                self.variables.insert(name.clone(), result);
+                            }
+                            Err(_) => {
+                                // If evaluation fails, store the raw string
+                                self.variables
+                                    .insert(name.clone(), Value::String(value.clone()));
+                            }
+                        }
+                    } else if trimmed.starts_with("${{") && trimmed.ends_with("}}") {
+                        // Compile-time expression (${{ expr }}): evaluate it now since
+                        // template resolution may not have processed pipeline-level variables.
+                        let inner = &trimmed[3..trimmed.len() - 2].trim();
+                        let engine = self.expression_engine();
+                        match engine.evaluate_compile_time(inner) {
+                            Ok(result) => {
+                                self.variables.insert(name.clone(), result);
+                            }
+                            Err(_) => {
+                                self.variables
+                                    .insert(name.clone(), Value::String(value.clone()));
+                            }
+                        }
+                    } else if trimmed.contains("${{") {
+                        // Value contains inline compile-time expressions; use substitute_macros
+                        // which handles ${{ }}, $[ ], and $() patterns within a string.
+                        let engine = self.expression_engine();
+                        match engine.substitute_macros(trimmed) {
+                            Ok(result) => {
+                                self.variables.insert(name.clone(), Value::String(result));
+                            }
+                            Err(_) => {
+                                self.variables
+                                    .insert(name.clone(), Value::String(value.clone()));
+                            }
+                        }
+                    } else {
+                        self.variables
+                            .insert(name.clone(), Value::String(value.clone()));
+                    }
                 }
                 Variable::Group { .. } => {
                     // Variable groups would need to be resolved from external source
@@ -197,6 +241,11 @@ impl RuntimeContext {
                 }
             }
         }
+    }
+
+    /// Merge pipeline-level variables (public entry point for the executor)
+    pub fn merge_pipeline_variables(&mut self, variables: &[Variable]) {
+        self.merge_variables(variables);
     }
 
     /// Build an ExpressionContext for evaluating conditions
@@ -270,7 +319,7 @@ impl RuntimeContext {
     pub fn evaluate_condition(&self, condition: &str) -> Result<bool, String> {
         let engine = self.expression_engine();
         engine
-            .evaluate_compile_time(condition)
+            .evaluate_runtime(condition)
             .map(|v| v.is_truthy())
             .map_err(|e| e.message)
     }
@@ -503,6 +552,7 @@ mod tests {
             template: None,
             parameters: HashMap::new(),
             pool: None,
+            has_template_directives: false,
         };
 
         ctx.enter_stage(&stage);

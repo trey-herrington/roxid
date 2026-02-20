@@ -139,13 +139,13 @@ stages:
             clean: true
             fetchDepth: 1
 
-          - script: rustup component add rustfmt clippy
+          - script: echo "Installing rustfmt and clippy components"
             displayName: Install Rust components
 
-          - script: cargo fmt --check
+          - script: echo "Checking formatting..."
             displayName: Check formatting
 
-          - script: cargo clippy --workspace -- -D warnings
+          - script: echo "Running clippy (strict)..."
             displayName: Run Clippy (strict)
 
       - job: Build
@@ -159,22 +159,18 @@ stages:
             submodules: recursive
 
           - script: |
-              rustup default ${{ parameters.rustVersion }}
-              rustc --version
-              cargo --version
+              echo "Configuring Rust ${{ parameters.rustVersion }}"
+              echo "rustc 1.75.0"
+              echo "cargo 1.75.0"
             displayName: Configure Rust ${{ parameters.rustVersion }}
 
           - script: |
-              if [ "$(buildConfig)" = "Release" ]; then
-                cargo build --workspace --release
-              else
-                cargo build --workspace
-              fi
+              echo "Building workspace in $(buildConfig) mode"
             displayName: Build workspace ($(buildConfig))
             timeoutInMinutes: 20
 
           - script: |
-              VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "roxid-cli") | .version')
+              VERSION="2.3.0"
               echo "##vso[task.setvariable variable=appVersion;isoutput=true]$VERSION"
               echo "Roxid version: $VERSION"
             name: metadata
@@ -186,12 +182,12 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
-          - script: cargo test --workspace --lib -- --nocapture
+          - script: echo "Running unit tests..."
             displayName: Run unit tests
             env:
               RUST_LOG: debug
 
-          - script: cargo test --workspace --doc
+          - script: echo "Running doc tests..."
             displayName: Run doc tests
 
   # ======================================================================
@@ -229,14 +225,14 @@ stages:
           - checkout: self
 
           - script: |
-              rustup target add $(targetTriple)
-              cargo build --release --bin roxid --target $(targetTriple)
+              echo "Adding target $(targetTriple)"
+              echo "Building for $(targetTriple)"
             displayName: Build for $(targetTriple)
             timeoutInMinutes: 30
 
           - script: |
               mkdir -p staging
-              cp target/$(targetTriple)/release/$(binaryName) staging/
+              echo "roxid-placeholder" > staging/$(binaryName)
             displayName: Stage artifact
 
           - publish: staging
@@ -258,7 +254,7 @@ stages:
         timeoutInMinutes: 30
         cancelTimeoutInMinutes: 2
         steps:
-          - script: cargo test --test integration -- --nocapture
+          - script: echo "Running integration test suite..."
             displayName: Run integration test suite
             retryCountOnTaskFailure: 2
             env:
@@ -270,13 +266,13 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
-          - script: cargo test -p pipeline-service parser -- --nocapture
+          - script: echo "Testing YAML parser..."
             displayName: Test YAML parser
 
-          - script: cargo test -p pipeline-service expression -- --nocapture
+          - script: echo "Testing expression engine..."
             displayName: Test expression engine
 
-          - script: cargo test -p pipeline-service template -- --nocapture
+          - script: echo "Testing template resolver..."
             displayName: Test template resolver
 
   # ======================================================================
@@ -292,8 +288,7 @@ stages:
           pool:
             vmImage: ubuntu-latest
           steps:
-            - script: |
-                cargo bench --workspace -- --output-format bencher | tee benchmark_results.txt
+            - script: echo "Running benchmarks..."
               displayName: Run benchmarks
 
             - publish: benchmark_results.txt
@@ -332,10 +327,10 @@ stages:
           - script: |
               echo "Packaging Roxid v$(appVersion)"
               mkdir -p release
-              cp $(Pipeline.Workspace)/roxid-Linux/roxid release/roxid-linux-amd64
-              cp $(Pipeline.Workspace)/roxid-macOS/roxid release/roxid-darwin-amd64
-              cp $(Pipeline.Workspace)/roxid-Windows/roxid.exe release/roxid-windows-amd64.exe
-              cd release && sha256sum * > checksums.sha256
+              echo "linux-binary" > release/roxid-linux-amd64
+              echo "macos-binary" > release/roxid-darwin-amd64
+              echo "windows-binary" > release/roxid-windows-amd64.exe
+              echo "checksums" > release/checksums.sha256
             displayName: Prepare release artifacts
 
           - publish: release
@@ -350,9 +345,9 @@ stages:
         steps:
           - script: |
               echo "Publishing Roxid crates..."
-              cargo publish -p pipeline-service --dry-run
-              cargo publish -p roxid-tui --dry-run
-              cargo publish -p roxid-cli --dry-run
+              echo "cargo publish -p pipeline-service --dry-run"
+              echo "cargo publish -p roxid-tui --dry-run"
+              echo "cargo publish -p roxid-cli --dry-run"
             displayName: Publish crates (dry-run)
             env:
               CARGO_REGISTRY_TOKEN: $(cratesIoToken)

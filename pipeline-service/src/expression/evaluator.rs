@@ -335,6 +335,7 @@ impl<'a> Evaluator<'a> {
                     .collect(),
             )),
             "dependencies" => self.dependencies_to_value(),
+            "stagedependencies" => self.stage_dependencies_to_value(),
             "env" => Ok(Value::Object(
                 self.context
                     .env
@@ -467,6 +468,36 @@ impl<'a> Evaluator<'a> {
                 ),
             );
             map.insert(name.clone(), Value::Object(job_map));
+        }
+
+        Ok(Value::Object(map))
+    }
+
+    /// Build stageDependencies value with Azure DevOps nesting:
+    /// stageDependencies.StageName.JobName.outputs['stepName.varName']
+    fn stage_dependencies_to_value(&self) -> Result<Value, EvalError> {
+        let mut map = HashMap::new();
+
+        for (stage_name, dep) in &self.context.dependencies.stages {
+            let mut stage_map = HashMap::new();
+            stage_map.insert("result".to_string(), Value::String(dep.result.clone()));
+
+            // In stageDependencies, jobs are direct children of the stage
+            for (job_name, job_outputs) in &dep.outputs {
+                let mut job_map = HashMap::new();
+                job_map.insert(
+                    "outputs".to_string(),
+                    Value::Object(
+                        job_outputs
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    ),
+                );
+                stage_map.insert(job_name.clone(), Value::Object(job_map));
+            }
+
+            map.insert(stage_name.clone(), Value::Object(stage_map));
         }
 
         Ok(Value::Object(map))

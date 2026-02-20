@@ -694,10 +694,15 @@ impl<'a> AssertionEvaluator<'a> {
     }
 
     fn available_steps_hint(&self) -> String {
-        let names: Vec<&str> = self
+        let names: Vec<String> = self
             .step_index
             .iter()
-            .filter_map(|s| s.name.as_deref())
+            .filter_map(|s| {
+                s.name
+                    .as_deref()
+                    .or(s.display_name.as_deref())
+                    .map(|n| n.to_string())
+            })
             .collect();
         format!("Available steps: [{}]", names.join(", "))
     }

@@ -10,14 +10,11 @@ use crate::parser::models::{
     StepAction, StepResult, StepStatus,
 };
 use crate::runners::container::ContainerRunner;
-use crate::runners::shell::ShellRunner;
 use crate::runners::task::TaskRunner;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
 
 /// Result of pipeline execution
 #[derive(Debug, Clone)]
@@ -70,9 +67,6 @@ pub struct PipelineExecutor {
     config: ExecutorConfig,
     /// Progress event sender
     event_tx: Option<ProgressSender>,
-    /// Shell runner for script steps
-    #[allow(dead_code)]
-    shell_runner: ShellRunner,
     /// Task runner for Azure DevOps tasks
     task_runner: Option<TaskRunner>,
     /// Container runner for Docker-based jobs
@@ -87,7 +81,6 @@ impl PipelineExecutor {
             graph,
             config: ExecutorConfig::default(),
             event_tx: None,
-            shell_runner: ShellRunner::new(),
             task_runner: None,
             container_runner: None,
         })
@@ -99,7 +92,6 @@ impl PipelineExecutor {
             graph,
             config: ExecutorConfig::default(),
             event_tx: None,
-            shell_runner: ShellRunner::new(),
             task_runner: None,
             container_runner: None,
         }
@@ -143,6 +135,16 @@ impl PipelineExecutor {
     pub async fn execute(&self, context: ExecutionContext) -> ExecutionResult {
         let start = Instant::now();
         let mut runtime = RuntimeContext::new(context);
+
+        // Merge pipeline-level variables (test-provided variables from ExecutionContext
+        // were already loaded in RuntimeContext::new, so save them, merge pipeline vars,
+        // then re-apply test vars so they take precedence)
+        let test_vars = runtime.variables.clone();
+        runtime.merge_pipeline_variables(&self.graph.variables);
+        for (k, v) in test_vars {
+            runtime.variables.insert(k, v);
+        }
+
         let mut stage_results = Vec::new();
         let mut overall_success = true;
 
@@ -238,7 +240,7 @@ impl PipelineExecutor {
                 stage_name: stage_name.clone(),
                 display_name: stage.display_name.clone(),
                 status: StageStatus::Skipped,
-                jobs: Vec::new(),
+                jobs: skipped_job_results(stage_node),
                 duration: start.elapsed(),
             };
         }
@@ -257,7 +259,7 @@ impl PipelineExecutor {
                         stage_name: stage_name.clone(),
                         display_name: stage.display_name.clone(),
                         status: StageStatus::Skipped,
-                        jobs: Vec::new(),
+                        jobs: skipped_job_results(stage_node),
                         duration: start.elapsed(),
                     };
                 }
@@ -272,7 +274,7 @@ impl PipelineExecutor {
                         stage_name: stage_name.clone(),
                         display_name: stage.display_name.clone(),
                         status: StageStatus::Failed,
-                        jobs: Vec::new(),
+                        jobs: skipped_job_results(stage_node),
                         duration: start.elapsed(),
                     };
                 }
@@ -383,7 +385,7 @@ impl PipelineExecutor {
                 job_name,
                 display_name: job.display_name.clone(),
                 status: JobStatus::Skipped,
-                steps: Vec::new(),
+                steps: skipped_step_results(job),
                 duration: start.elapsed(),
                 outputs: HashMap::new(),
             };
@@ -404,7 +406,7 @@ impl PipelineExecutor {
                         job_name,
                         display_name: job.display_name.clone(),
                         status: JobStatus::Skipped,
-                        steps: Vec::new(),
+                        steps: skipped_step_results(job),
                         duration: start.elapsed(),
                         outputs: HashMap::new(),
                     };
@@ -420,7 +422,7 @@ impl PipelineExecutor {
                         job_name,
                         display_name: job.display_name.clone(),
                         status: JobStatus::Failed,
-                        steps: Vec::new(),
+                        steps: skipped_step_results(job),
                         duration: start.elapsed(),
                         outputs: HashMap::new(),
                     };
@@ -456,13 +458,13 @@ impl PipelineExecutor {
         let job_name = job.identifier().unwrap_or("unknown").to_string();
         let start = Instant::now();
 
-        let max_parallel = job
+        let _max_parallel = job
             .strategy
             .as_ref()
             .and_then(|s| s.max_parallel)
             .unwrap_or(instances.len() as u32);
 
-        let _semaphore = Arc::new(Semaphore::new(max_parallel as usize));
+        // TODO: Use max_parallel with a semaphore for parallel matrix instance execution
         let mut all_steps = Vec::new();
         let mut overall_status = JobStatus::Succeeded;
 
@@ -499,9 +501,11 @@ impl PipelineExecutor {
             duration: start.elapsed(),
             outputs: runtime
                 .step_outputs
-                .values()
-                .flat_map(|m| m.iter())
-                .map(|(k, v)| (k.clone(), v.as_string()))
+                .iter()
+                .flat_map(|(step_name, m)| {
+                    m.iter()
+                        .map(move |(k, v)| (format!("{}.{}", step_name, k), v.as_string()))
+                })
                 .collect(),
         }
     }
@@ -519,24 +523,43 @@ impl PipelineExecutor {
 
         runtime.enter_job(job);
 
+        // For deployment jobs, collect steps from strategy hooks
+        let deployment_steps = if job.deployment.is_some() {
+            collect_deployment_steps(job)
+        } else {
+            Vec::new()
+        };
+
+        let effective_steps: Vec<&Step> = if !deployment_steps.is_empty() {
+            deployment_steps.iter().collect()
+        } else {
+            job.steps.iter().collect()
+        };
+
         self.event_tx.send_event(ExecutionEvent::job_started(
             stage_name,
             job_name,
             job.display_name.clone(),
             matrix_instance.map(String::from),
-            job.steps.len(),
+            effective_steps.len(),
         ));
 
         let mut step_results = Vec::new();
         let mut job_status = JobStatus::Succeeded;
         let mut should_run = true;
 
-        for (step_index, step) in job.steps.iter().enumerate() {
+        for (step_index, step) in effective_steps.iter().enumerate() {
             if !should_run && !should_always_run(step) {
                 // Skip remaining steps if a previous step failed
+                let resolved_display = step.display_name.as_ref().and_then(|dn| {
+                    runtime
+                        .substitute_variables(dn)
+                        .ok()
+                        .or_else(|| Some(dn.clone()))
+                });
                 let skipped = StepResult {
                     step_name: step.name.clone(),
-                    display_name: step.display_name.clone(),
+                    display_name: resolved_display,
                     status: StepStatus::Skipped,
                     output: String::new(),
                     error: None,
@@ -584,9 +607,11 @@ impl PipelineExecutor {
             duration,
             outputs: runtime
                 .step_outputs
-                .values()
-                .flat_map(|m| m.iter())
-                .map(|(k, v)| (k.clone(), v.as_string()))
+                .iter()
+                .flat_map(|(step_name, m)| {
+                    m.iter()
+                        .map(move |(k, v)| (format!("{}.{}", step_name, k), v.as_string()))
+                })
                 .collect(),
         };
 
@@ -615,6 +640,14 @@ impl PipelineExecutor {
         let start = Instant::now();
         let step_name = step.name.clone();
 
+        // Resolve display name by substituting variables (e.g., "Build for $(targetTriple)")
+        let display_name = step.display_name.as_ref().and_then(|dn| {
+            runtime
+                .substitute_variables(dn)
+                .ok()
+                .or_else(|| Some(dn.clone()))
+        });
+
         // Check if step is enabled
         if !step.enabled {
             self.event_tx.send_event(ExecutionEvent::StepSkipped {
@@ -627,7 +660,7 @@ impl PipelineExecutor {
 
             return StepResult {
                 step_name,
-                display_name: step.display_name.clone(),
+                display_name: display_name.clone(),
                 status: StepStatus::Skipped,
                 output: String::new(),
                 error: None,
@@ -652,7 +685,7 @@ impl PipelineExecutor {
 
                     return StepResult {
                         step_name,
-                        display_name: step.display_name.clone(),
+                        display_name: display_name.clone(),
                         status: StepStatus::Skipped,
                         output: String::new(),
                         error: None,
@@ -664,7 +697,7 @@ impl PipelineExecutor {
                 Err(e) => {
                     return StepResult {
                         step_name,
-                        display_name: step.display_name.clone(),
+                        display_name: display_name.clone(),
                         status: StepStatus::Failed,
                         output: String::new(),
                         error: Some(format!("Condition evaluation failed: {}", e)),
@@ -681,12 +714,12 @@ impl PipelineExecutor {
             stage_name,
             job_name,
             step_name.clone(),
-            step.display_name.clone(),
+            display_name.clone(),
             step_index,
         ));
 
         // Execute the step based on its action type
-        let result = self
+        let mut result = self
             .execute_step_action(
                 &step.action,
                 step,
@@ -696,6 +729,9 @@ impl PipelineExecutor {
                 runtime,
             )
             .await;
+
+        // Override display_name with variable-substituted version
+        result.display_name = display_name;
 
         // Send step completed event
         self.event_tx.send_event(ExecutionEvent::step_completed(
@@ -1201,6 +1237,107 @@ fn should_always_run(step: &Step) -> bool {
         .unwrap_or(false)
 }
 
+/// Build synthetic skipped step results for all steps in a job
+fn skipped_step_results(job: &Job) -> Vec<StepResult> {
+    // Use deployment steps if this is a deployment job
+    let steps: Vec<&Step> = if job.deployment.is_some() {
+        let deployment = collect_deployment_steps(job);
+        if !deployment.is_empty() {
+            return deployment
+                .iter()
+                .map(|step| StepResult {
+                    step_name: step.name.clone(),
+                    display_name: step.display_name.clone(),
+                    status: StepStatus::Skipped,
+                    output: String::new(),
+                    error: None,
+                    duration: Duration::ZERO,
+                    exit_code: None,
+                    outputs: HashMap::new(),
+                })
+                .collect();
+        }
+        job.steps.iter().collect()
+    } else {
+        job.steps.iter().collect()
+    };
+
+    steps
+        .iter()
+        .map(|step| StepResult {
+            step_name: step.name.clone(),
+            display_name: step.display_name.clone(),
+            status: StepStatus::Skipped,
+            output: String::new(),
+            error: None,
+            duration: Duration::ZERO,
+            exit_code: None,
+            outputs: HashMap::new(),
+        })
+        .collect()
+}
+
+/// Collect steps from deployment strategy hooks in execution order.
+///
+/// Deployment jobs define steps inside strategy hooks (runOnce, rolling, canary)
+/// rather than in the top-level `steps` field. This function extracts steps from
+/// the hooks in the correct Azure DevOps execution order:
+/// preDeploy → deploy → routeTraffic → postRouteTraffic
+fn collect_deployment_steps(job: &Job) -> Vec<Step> {
+    let mut steps = Vec::new();
+
+    if let Some(strategy) = &job.strategy {
+        // Helper to extract steps from DeploymentHooks
+        let extract_from_hooks =
+            |hooks: &crate::parser::models::DeploymentHooks, steps: &mut Vec<Step>| {
+                if let Some(hook) = &hooks.pre_deploy {
+                    steps.extend(hook.steps.clone());
+                }
+                if let Some(hook) = &hooks.deploy {
+                    steps.extend(hook.steps.clone());
+                }
+                if let Some(hook) = &hooks.route_traffic {
+                    steps.extend(hook.steps.clone());
+                }
+                if let Some(hook) = &hooks.post_route_traffic {
+                    steps.extend(hook.steps.clone());
+                }
+            };
+
+        if let Some(run_once) = &strategy.run_once {
+            extract_from_hooks(run_once, &mut steps);
+        }
+        if let Some(rolling) = &strategy.rolling {
+            extract_from_hooks(&rolling.hooks, &mut steps);
+        }
+        if let Some(canary) = &strategy.canary {
+            extract_from_hooks(&canary.hooks, &mut steps);
+        }
+    }
+
+    steps
+}
+
+/// Build synthetic skipped job results for all jobs in a stage node
+fn skipped_job_results(stage_node: &StageNode) -> Vec<JobResult> {
+    stage_node
+        .jobs
+        .iter()
+        .map(|job_node| {
+            let job = &job_node.job;
+            let job_name = job.identifier().unwrap_or("unknown").to_string();
+            JobResult {
+                job_name,
+                display_name: job.display_name.clone(),
+                status: JobStatus::Skipped,
+                steps: skipped_step_results(job),
+                duration: Duration::ZERO,
+                outputs: HashMap::new(),
+            }
+        })
+        .collect()
+}
+
 /// Parse Azure DevOps logging commands from output
 fn parse_logging_commands(output: &str, runtime: &mut RuntimeContext) -> HashMap<String, String> {
     let mut outputs = HashMap::new();
@@ -1217,9 +1354,9 @@ fn parse_logging_commands(output: &str, runtime: &mut RuntimeContext) -> HashMap
                     let prop = prop.trim();
                     if let Some(name) = prop.strip_prefix("variable=") {
                         var_name = Some(name.to_string());
-                    } else if prop == "isoutput=true" || prop == "isOutput=true" {
+                    } else if prop.eq_ignore_ascii_case("isoutput=true") {
                         is_output = true;
-                    } else if prop == "issecret=true" || prop == "isSecret=true" {
+                    } else if prop.eq_ignore_ascii_case("issecret=true") {
                         is_secret = true;
                     }
                 }
@@ -1288,11 +1425,13 @@ mod tests {
                     template: None,
                     parameters: HashMap::new(),
                     environment: None,
+                    has_template_directives: false,
                 }],
                 lock_behavior: None,
                 template: None,
                 parameters: HashMap::new(),
                 pool: None,
+                has_template_directives: false,
             }],
             ..Default::default()
         }

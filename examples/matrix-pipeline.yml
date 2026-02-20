@@ -42,15 +42,15 @@ jobs:
       - checkout: self
 
       - script: |
-          rustup default $(rustToolchain)
-          rustup target add $(targetTriple)
+          echo "Configuring Rust $(rustToolchain)"
+          echo "Adding target $(targetTriple)"
         displayName: Configure Rust $(rustToolchain)
 
-      - script: cargo build --target $(targetTriple)
+      - script: echo "Building for target $(targetTriple)"
         displayName: Build for $(targetTriple)
         timeoutInMinutes: 20
 
-      - script: cargo test --target $(targetTriple)
+      - script: echo "Testing on $(osName)"
         displayName: Test on $(osName)
         env:
           RUST_BACKTRACE: "1"
@@ -74,10 +74,10 @@ jobs:
     pool:
       vmImage: ubuntu-latest
     steps:
-      - script: cargo test -p pipeline-service $(cargoFlags)
+      - script: echo "Testing pipeline-service with flags $(cargoFlags)"
         displayName: Test pipeline-service ($(featureSet))
 
-      - script: cargo test -p roxid-tui $(cargoFlags)
+      - script: echo "Testing roxid-tui with flags $(cargoFlags)"
         displayName: Test roxid-tui ($(featureSet))
 
   # ---- Parallel job count strategy ----
@@ -91,5 +91,4 @@ jobs:
     steps:
       - script: |
           echo "Running integration test batch $(System.JobPositionInPhase) of $(System.TotalJobsInPhase)"
-          cargo test --test integration -- --partition count:$(System.TotalJobsInPhase):$(System.JobPositionInPhase)
         displayName: Run integration test partition

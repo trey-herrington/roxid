@@ -13,8 +13,16 @@ pub struct AzureParser;
 impl AzureParser {
     /// Parse pipeline from YAML string
     pub fn parse(content: &str) -> ParseResult<Pipeline> {
-        let pipeline: Pipeline =
+        // First pass: parse as raw YAML to detect template directives
+        let raw_value: serde_yaml::Value =
             serde_yaml::from_str(content).map_err(|e| ParseError::from_yaml_error(&e, content))?;
+
+        // Second pass: deserialize into typed Pipeline
+        let mut pipeline: Pipeline =
+            serde_yaml::from_str(content).map_err(|e| ParseError::from_yaml_error(&e, content))?;
+
+        // Set template directive flags based on raw YAML scan
+        Self::detect_template_directives(&raw_value, &mut pipeline);
 
         Ok(pipeline)
     }
@@ -40,6 +48,109 @@ impl AzureParser {
             crate::parser::template::TemplateEngine::new(repo_root.as_ref().to_path_buf());
         engine.resolve_pipeline(pipeline)
     }
+
+    /// Scan raw YAML to detect compile-time template directives (${{ if }}, ${{ each }})
+    /// and set `has_template_directives` flags on the parsed pipeline structures.
+    /// This is needed because `deserialize_tolerant_vec` silently drops these directives,
+    /// which can cause the validator to falsely report missing jobs/steps.
+    fn detect_template_directives(raw: &serde_yaml::Value, pipeline: &mut Pipeline) {
+        let mapping = match raw.as_mapping() {
+            Some(m) => m,
+            None => return,
+        };
+
+        // Check top-level stages, jobs, steps for directives
+        if let Some(stages_val) = mapping.get(serde_yaml::Value::String("stages".into())) {
+            if Self::sequence_has_directives(stages_val) {
+                pipeline.has_template_directives = true;
+            }
+            // Check each stage's jobs list, tracking the parsed index separately
+            // since directive items in the raw sequence were dropped during parsing.
+            if let Some(stages_seq) = stages_val.as_sequence() {
+                let mut parsed_idx = 0;
+                for stage_val in stages_seq {
+                    if Self::is_directive_item(stage_val) {
+                        continue;
+                    }
+                    if let Some(stage_map) = stage_val.as_mapping() {
+                        if let Some(jobs_val) =
+                            stage_map.get(serde_yaml::Value::String("jobs".into()))
+                        {
+                            if Self::sequence_has_directives(jobs_val) {
+                                if let Some(stage) = pipeline.stages.get_mut(parsed_idx) {
+                                    stage.has_template_directives = true;
+                                }
+                            }
+                            // Check each job's steps list
+                            if let Some(jobs_seq) = jobs_val.as_sequence() {
+                                Self::detect_job_step_directives(
+                                    jobs_seq,
+                                    &mut pipeline.stages,
+                                    parsed_idx,
+                                );
+                            }
+                        }
+                    }
+                    parsed_idx += 1;
+                }
+            }
+        }
+
+        if let Some(jobs_val) = mapping.get(serde_yaml::Value::String("jobs".into())) {
+            if Self::sequence_has_directives(jobs_val) {
+                pipeline.has_template_directives = true;
+            }
+        }
+
+        if let Some(steps_val) = mapping.get(serde_yaml::Value::String("steps".into())) {
+            if Self::sequence_has_directives(steps_val) {
+                pipeline.has_template_directives = true;
+            }
+        }
+    }
+
+    /// Check jobs within a stage for step-level template directives.
+    /// The raw YAML job sequence may have more items than the parsed stage's job list
+    /// (because directive items were dropped), so we match by counting non-directive items.
+    fn detect_job_step_directives(
+        raw_jobs_seq: &[serde_yaml::Value],
+        stages: &mut [Stage],
+        stage_idx: usize,
+    ) {
+        let mut parsed_job_idx = 0;
+        for job_val in raw_jobs_seq {
+            if Self::is_directive_item(job_val) {
+                // This item was dropped during parsing; skip it
+                continue;
+            }
+            if let Some(job_map) = job_val.as_mapping() {
+                if let Some(steps_val) = job_map.get(serde_yaml::Value::String("steps".into())) {
+                    if Self::sequence_has_directives(steps_val) {
+                        if let Some(stage) = stages.get_mut(stage_idx) {
+                            if let Some(job) = stage.jobs.get_mut(parsed_job_idx) {
+                                job.has_template_directives = true;
+                            }
+                        }
+                    }
+                }
+            }
+            parsed_job_idx += 1;
+        }
+    }
+
+    /// Check whether a YAML sequence contains any template directive items
+    fn sequence_has_directives(value: &serde_yaml::Value) -> bool {
+        if let Some(seq) = value.as_sequence() {
+            seq.iter().any(Self::is_directive_item)
+        } else {
+            false
+        }
+    }
+
+    /// Check whether a YAML value is a template directive (${{ if }}, ${{ each }}, etc.)
+    fn is_directive_item(value: &serde_yaml::Value) -> bool {
+        crate::parser::models::is_template_directive(value)
+    }
 }
 
 /// Validator for parsed pipelines
@@ -50,11 +161,14 @@ impl PipelineValidator {
     pub fn validate(pipeline: &Pipeline) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
 
-        // Check for valid structure (must have stages, jobs, or steps)
+        // Check for valid structure (must have stages, jobs, steps, or extends)
+        // Also accept pipelines that had template directives (which were dropped
+        // during deserialization but may provide stages/jobs/steps at compile time)
         if pipeline.stages.is_empty()
             && pipeline.jobs.is_empty()
             && pipeline.steps.is_empty()
             && pipeline.extends.is_none()
+            && !pipeline.has_template_directives
         {
             errors.push(ValidationError::new(
                 "pipeline must have stages, jobs, steps, or extends",
@@ -89,8 +203,8 @@ impl PipelineValidator {
     }
 
     fn validate_stage(stage: &Stage, path: &str, errors: &mut Vec<ValidationError>) {
-        // Stage must have jobs or template
-        if stage.jobs.is_empty() && stage.template.is_none() {
+        // Stage must have jobs or template (or have template directives that may provide jobs)
+        if stage.jobs.is_empty() && stage.template.is_none() && !stage.has_template_directives {
             errors.push(
                 ValidationError::new("stage must have jobs or reference a template", path)
                     .with_suggestion("add 'jobs:' or 'template:' to the stage"),
@@ -112,8 +226,12 @@ impl PipelineValidator {
             );
         }
 
-        // Job must have steps (unless template or deployment)
-        if job.steps.is_empty() && job.template.is_none() && job.deployment.is_none() {
+        // Job must have steps (unless template, deployment, or has template directives)
+        if job.steps.is_empty()
+            && job.template.is_none()
+            && job.deployment.is_none()
+            && !job.has_template_directives
+        {
             errors.push(
                 ValidationError::new("job must have steps", path)
                     .with_suggestion("add 'steps:' to define what the job should do"),
@@ -286,6 +404,7 @@ pub fn normalize_pipeline(mut pipeline: Pipeline) -> Pipeline {
             template: None,
             parameters: std::collections::HashMap::new(),
             environment: None,
+            has_template_directives: false,
         }];
     }
 
@@ -302,6 +421,7 @@ pub fn normalize_pipeline(mut pipeline: Pipeline) -> Pipeline {
             template: None,
             parameters: std::collections::HashMap::new(),
             pool: pipeline.pool.clone(),
+            has_template_directives: false,
         }];
     }
 
